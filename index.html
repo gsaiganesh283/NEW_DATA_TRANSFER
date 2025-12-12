@@ -190,6 +190,21 @@
                     
                     <div id="filesList" class="files-list"></div>
                     
+                    <!-- Destination Folder Selection -->
+                    <div class="destination-folder-section">
+                        <div class="destination-header">
+                            <span>📂 Save Location</span>
+                            <button id="selectDestinationBtn" class="btn btn-outline btn-small">
+                                📁 Choose Folder
+                            </button>
+                        </div>
+                        <div id="destinationPath" class="destination-path">
+                            <span class="path-label">Default:</span>
+                            <span id="selectedPath">Browser Downloads Folder</span>
+                        </div>
+                        <small class="destination-hint" id="destinationHint">Click "Choose Folder" to select a custom save location</small>
+                    </div>
+                    
                     <!-- Download Options -->
                     <div class="download-options">
                         <button id="downloadSelectedBtn" class="btn btn-primary">
@@ -197,6 +212,9 @@
                         </button>
                         <button id="downloadAsZipBtn" class="btn btn-secondary">
                             <span>🗜️</span> Download as ZIP
+                        </button>
+                        <button id="downloadToFolderBtn" class="btn btn-success">
+                            <span>📂</span> Save to Folder
                         </button>
                     </div>
 

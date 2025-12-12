@@ -5,6 +5,8 @@ let uploadType = 'files'; // 'files', 'folder', 'zip'
 let folderStructure = {}; // Track folder paths
 let currentTransferPassword = null; // Password for current transfer being viewed
 let currentTransferFiles = []; // Files from current transfer
+let selectedDestinationHandle = null; // Selected destination folder handle
+let currentCode = null; // Current transfer code being viewed
 
 // DOM Elements
 const tabBtns = document.querySelectorAll('.tab-btn');
@@ -644,10 +646,26 @@ function renderAvailableFiles(code, files) {
 }
 
 function setupDownloadButtons(code, files) {
+    currentCode = code;
+    currentTransferFiles = files;
+    
     // Select all checkbox
     const selectAllFiles = document.getElementById('selectAllFiles');
     const downloadSelectedBtn = document.getElementById('downloadSelectedBtn');
     const downloadAsZipBtn = document.getElementById('downloadAsZipBtn');
+    const downloadToFolderBtn = document.getElementById('downloadToFolderBtn');
+    const selectDestinationBtn = document.getElementById('selectDestinationBtn');
+    
+    // Check if File System Access API is supported
+    const fsApiSupported = 'showDirectoryPicker' in window;
+    
+    // Update UI based on API support
+    if (!fsApiSupported) {
+        if (downloadToFolderBtn) downloadToFolderBtn.style.display = 'none';
+        if (selectDestinationBtn) selectDestinationBtn.style.display = 'none';
+        const destinationHint = document.getElementById('destinationHint');
+        if (destinationHint) destinationHint.textContent = 'Files will be saved to your browser\'s default download location';
+    }
     
     if (selectAllFiles) {
         selectAllFiles.checked = true;
@@ -656,6 +674,10 @@ function setupDownloadButtons(code, files) {
                 cb.checked = selectAllFiles.checked;
             });
         };
+    }
+    
+    if (selectDestinationBtn && fsApiSupported) {
+        selectDestinationBtn.onclick = selectDestinationFolder;
     }
     
     if (downloadSelectedBtn) {
@@ -681,6 +703,17 @@ function setupDownloadButtons(code, files) {
                 return;
             }
             downloadAsZip(code, selected);
+        };
+    }
+    
+    if (downloadToFolderBtn && fsApiSupported) {
+        downloadToFolderBtn.onclick = () => {
+            const selected = getSelectedIndexes();
+            if (selected.length === 0) {
+                showToast('No files selected', 'error');
+                return;
+            }
+            downloadToSelectedFolder(code, files, selected);
         };
     }
 }
@@ -714,6 +747,125 @@ function downloadAsZip(code, indexes) {
     link.download = `transfer-${code}.zip`;
     link.click();
     showToast('Downloading as ZIP...', 'success');
+}
+
+// Select destination folder using File System Access API
+async function selectDestinationFolder() {
+    try {
+        selectedDestinationHandle = await window.showDirectoryPicker({
+            mode: 'readwrite',
+            startIn: 'downloads'
+        });
+        
+        const selectedPathEl = document.getElementById('selectedPath');
+        const destinationHint = document.getElementById('destinationHint');
+        
+        if (selectedPathEl) {
+            selectedPathEl.textContent = selectedDestinationHandle.name;
+        }
+        if (destinationHint) {
+            destinationHint.textContent = '✓ Custom folder selected - click "Save to Folder" to download';
+            destinationHint.style.color = 'var(--success-color)';
+        }
+        
+        showToast(`Folder selected: ${selectedDestinationHandle.name}`, 'success');
+    } catch (error) {
+        if (error.name !== 'AbortError') {
+            showToast('Failed to select folder', 'error');
+            console.error('Folder selection error:', error);
+        }
+    }
+}
+
+// Download files directly to selected folder
+async function downloadToSelectedFolder(code, files, selectedIndexes) {
+    if (!selectedDestinationHandle) {
+        // Prompt to select folder first
+        await selectDestinationFolder();
+        if (!selectedDestinationHandle) {
+            return;
+        }
+    }
+    
+    showToast(`Saving ${selectedIndexes.length} file(s) to ${selectedDestinationHandle.name}...`, 'success');
+    
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (const idx of selectedIndexes) {
+        const file = files[idx];
+        let url = `/api/download/${code}/${idx}`;
+        if (currentTransferPassword) {
+            url += `?password=${encodeURIComponent(currentTransferPassword)}`;
+        }
+        
+        try {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error('Download failed');
+            
+            const blob = await response.blob();
+            const filename = file.folderPath || file.name;
+            
+            // Handle folder structure
+            const pathParts = filename.split('/');
+            let currentDir = selectedDestinationHandle;
+            
+            // Create nested folders if needed
+            if (pathParts.length > 1) {
+                for (let i = 0; i < pathParts.length - 1; i++) {
+                    currentDir = await currentDir.getDirectoryHandle(pathParts[i], { create: true });
+                }
+            }
+            
+            // Create and write file
+            const finalFilename = pathParts[pathParts.length - 1];
+            const fileHandle = await currentDir.getFileHandle(finalFilename, { create: true });
+            const writable = await fileHandle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            
+            successCount++;
+        } catch (error) {
+            console.error(`Failed to save ${file.name}:`, error);
+            failCount++;
+        }
+    }
+    
+    if (failCount === 0) {
+        showToast(`✓ ${successCount} file(s) saved to ${selectedDestinationHandle.name}`, 'success');
+    } else {
+        showToast(`Saved ${successCount} file(s), ${failCount} failed`, 'error');
+    }
+}
+
+// Download ZIP to selected folder
+async function downloadZipToFolder(code, indexes) {
+    if (!selectedDestinationHandle) {
+        await selectDestinationFolder();
+        if (!selectedDestinationHandle) return;
+    }
+    
+    let url = `/api/download-zip/${code}?indexes=${indexes.join(',')}`;
+    if (currentTransferPassword) {
+        url += `&password=${encodeURIComponent(currentTransferPassword)}`;
+    }
+    
+    try {
+        showToast('Downloading ZIP...', 'success');
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Download failed');
+        
+        const blob = await response.blob();
+        const fileHandle = await selectedDestinationHandle.getFileHandle(`transfer-${code}.zip`, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        
+        showToast(`✓ ZIP saved to ${selectedDestinationHandle.name}`, 'success');
+    } catch (error) {
+        console.error('ZIP download error:', error);
+        showToast('Failed to save ZIP', 'error');
+    }
 }
 
 function previewFile(code, index, filename, type) {
