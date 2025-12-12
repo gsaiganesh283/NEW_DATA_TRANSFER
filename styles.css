@@ -763,6 +763,133 @@ input[type="text"]:focus {
     background: rgba(99, 102, 241, 0.3);
 }
 
+/* Database Management Styles */
+.database-actions {
+    margin-bottom: 25px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.database-actions h3,
+.database-viewer h3,
+.database-editor h3 {
+    margin-bottom: 15px;
+    color: var(--text-primary);
+}
+
+.button-group {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.database-tabs {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 15px;
+}
+
+.db-tab-btn {
+    padding: 10px 20px;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-color);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.db-tab-btn.active {
+    border-color: var(--primary-color);
+    background: rgba(99, 102, 241, 0.1);
+    color: var(--primary-color);
+}
+
+.database-info {
+    padding: 10px 15px;
+    background: var(--surface-light);
+    border-radius: 8px;
+    margin-bottom: 15px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.database-content {
+    margin-bottom: 25px;
+}
+
+.db-view {
+    display: none;
+}
+
+.db-view.active {
+    display: block;
+}
+
+.json-editor-wrapper {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.json-editor {
+    width: 100%;
+    min-height: 300px;
+    padding: 15px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    background: var(--bg-color);
+    color: var(--text-primary);
+    border: none;
+    resize: vertical;
+}
+
+.json-editor:focus {
+    outline: none;
+}
+
+.json-editor.editable {
+    background: #1a1a2e;
+    border: 2px solid var(--primary-color);
+}
+
+.database-editor {
+    padding-top: 20px;
+    border-top: 1px solid var(--border-color);
+}
+
+.warning-text {
+    color: var(--warning-color);
+    font-size: 0.9rem;
+    margin-bottom: 15px;
+    padding: 10px;
+    background: rgba(245, 158, 11, 0.1);
+    border-radius: 8px;
+}
+
+.edit-controls {
+    margin-bottom: 15px;
+}
+
+.edit-controls label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    color: var(--text-primary);
+}
+
+.edit-mode-panel {
+    margin-top: 15px;
+}
+
+.edit-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+}
+
 /* Destination Folder Section */
 .destination-folder-section {
     background: var(--surface-light);

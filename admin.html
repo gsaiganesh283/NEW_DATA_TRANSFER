@@ -57,6 +57,7 @@
             <button class="admin-tab-btn active" data-tab="users">👥 Users</button>
             <button class="admin-tab-btn" data-tab="transfers">📁 Transfers</button>
             <button class="admin-tab-btn" data-tab="settings">⚙️ Settings</button>
+            <button class="admin-tab-btn" data-tab="database">🗄️ Database</button>
         </div>
 
         <!-- Users Section -->
@@ -212,6 +213,91 @@
 
                     <button type="submit" class="btn btn-secondary">Change Password</button>
                 </form>
+            </div>
+        </div>
+
+        <!-- Database Section -->
+        <div id="databaseSection" class="admin-section">
+            <div class="card">
+                <div class="section-header">
+                    <h2>🗄️ Database Management</h2>
+                    <button id="refreshDatabaseBtn" class="btn btn-small btn-secondary">🔄 Refresh</button>
+                </div>
+                
+                <!-- Download Options -->
+                <div class="database-actions">
+                    <h3>📥 Download Database</h3>
+                    <div class="button-group">
+                        <button id="downloadUsersBtn" class="btn btn-secondary">
+                            <span>👥</span> Download Users
+                        </button>
+                        <button id="downloadSettingsBtn" class="btn btn-secondary">
+                            <span>⚙️</span> Download Settings
+                        </button>
+                        <button id="downloadAllBtn" class="btn btn-primary">
+                            <span>📦</span> Download Full Backup
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Database Viewer -->
+                <div class="database-viewer">
+                    <h3>👁️ View Database</h3>
+                    
+                    <div class="database-tabs">
+                        <button class="db-tab-btn active" data-db="users">Users (<span id="userCount">0</span>)</button>
+                        <button class="db-tab-btn" data-db="settings">Settings</button>
+                    </div>
+                    
+                    <div class="database-info">
+                        <span id="dbFileInfo">Select a database to view</span>
+                    </div>
+                    
+                    <div class="database-content">
+                        <div id="dbUsersView" class="db-view active">
+                            <div class="json-editor-wrapper">
+                                <textarea id="usersJsonEditor" class="json-editor" readonly></textarea>
+                            </div>
+                        </div>
+                        <div id="dbSettingsView" class="db-view">
+                            <div class="json-editor-wrapper">
+                                <textarea id="settingsJsonEditor" class="json-editor" readonly></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Database Editor -->
+                <div class="database-editor">
+                    <h3>✏️ Edit Database</h3>
+                    <p class="warning-text">⚠️ Warning: Direct database editing can break your application. Use with caution!</p>
+                    
+                    <div class="edit-controls">
+                        <label>
+                            <input type="checkbox" id="enableEditMode">
+                            Enable Edit Mode
+                        </label>
+                    </div>
+                    
+                    <div id="editModePanel" class="edit-mode-panel" style="display: none;">
+                        <div class="form-group">
+                            <label>Select Database to Edit:</label>
+                            <select id="editDbSelect">
+                                <option value="settings">Settings</option>
+                                <option value="users">Users (Limited)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="json-editor-wrapper">
+                            <textarea id="editJsonEditor" class="json-editor editable"></textarea>
+                        </div>
+                        
+                        <div class="edit-actions">
+                            <button id="validateJsonBtn" class="btn btn-secondary">Validate JSON</button>
+                            <button id="saveDbChangesBtn" class="btn btn-primary">Save Changes</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

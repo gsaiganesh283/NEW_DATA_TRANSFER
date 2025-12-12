@@ -630,6 +630,148 @@ app.get('/api/admin/settings', authenticateToken, requireAdmin, (req, res) => {
     res.json({ settings: systemSettings });
 });
 
+// ==================== DATABASE MANAGEMENT API (SuperAdmin Only) ====================
+
+// Get all database files info
+app.get('/api/admin/database', authenticateToken, requireSuperAdmin, (req, res) => {
+    try {
+        const users = loadUsers();
+        const settings = loadSettings();
+        
+        // Get file stats
+        const usersFilePath = path.join(dataDir, 'users.json');
+        const settingsFilePath = path.join(dataDir, 'settings.json');
+        
+        const usersStats = fs.existsSync(usersFilePath) ? fs.statSync(usersFilePath) : null;
+        const settingsStats = fs.existsSync(settingsFilePath) ? fs.statSync(settingsFilePath) : null;
+        
+        res.json({
+            success: true,
+            databases: {
+                users: {
+                    name: 'users.json',
+                    path: usersFilePath,
+                    size: usersStats ? usersStats.size : 0,
+                    modified: usersStats ? usersStats.mtime : null,
+                    recordCount: users.length,
+                    data: users.map(u => ({ ...u, password: '[HIDDEN]' })) // Hide passwords
+                },
+                settings: {
+                    name: 'settings.json',
+                    path: settingsFilePath,
+                    size: settingsStats ? settingsStats.size : 0,
+                    modified: settingsStats ? settingsStats.mtime : null,
+                    data: settings
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Database read error:', error);
+        res.status(500).json({ error: 'Failed to read database' });
+    }
+});
+
+// Download database file
+app.get('/api/admin/database/download/:type', authenticateToken, requireSuperAdmin, (req, res) => {
+    try {
+        const { type } = req.params;
+        let filePath, filename;
+        
+        if (type === 'users') {
+            filePath = path.join(dataDir, 'users.json');
+            filename = 'users.json';
+        } else if (type === 'settings') {
+            filePath = path.join(dataDir, 'settings.json');
+            filename = 'settings.json';
+        } else if (type === 'all') {
+            // Create a combined backup
+            const backup = {
+                exportedAt: new Date().toISOString(),
+                users: loadUsers().map(u => ({ ...u, password: '[EXPORTED]' })),
+                settings: loadSettings()
+            };
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Content-Disposition', `attachment; filename="backup-${Date.now()}.json"`);
+            return res.json(backup);
+        } else {
+            return res.status(400).json({ error: 'Invalid database type' });
+        }
+        
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ error: 'Database file not found' });
+        }
+        
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.sendFile(filePath);
+    } catch (error) {
+        console.error('Database download error:', error);
+        res.status(500).json({ error: 'Failed to download database' });
+    }
+});
+
+// Update database (settings only - users require specific endpoints)
+app.put('/api/admin/database/:type', authenticateToken, requireSuperAdmin, (req, res) => {
+    try {
+        const { type } = req.params;
+        const { data } = req.body;
+        
+        if (!data) {
+            return res.status(400).json({ error: 'No data provided' });
+        }
+        
+        if (type === 'settings') {
+            // Validate and save settings
+            const validKeys = ['maxFileSize', 'maxFiles', 'expiryTime', 'allowAnonymous', 'storagePath', 'enableCloudStorage', 'cloudProvider', 'cloudBucket', 'cloudRegion'];
+            const newSettings = {};
+            
+            for (const key of validKeys) {
+                if (data[key] !== undefined) {
+                    newSettings[key] = data[key];
+                }
+            }
+            
+            Object.assign(systemSettings, newSettings);
+            saveSettings(systemSettings);
+            
+            res.json({ success: true, message: 'Settings updated', settings: systemSettings });
+        } else if (type === 'users') {
+            // For users, only allow editing specific fields (not password directly)
+            if (!Array.isArray(data)) {
+                return res.status(400).json({ error: 'Users data must be an array' });
+            }
+            
+            let users = loadUsers();
+            
+            // Update existing users (don't allow adding new users or changing passwords this way)
+            for (const userData of data) {
+                const userIndex = users.findIndex(u => u.id === userData.id);
+                if (userIndex !== -1) {
+                    // Only update allowed fields
+                    if (userData.name) users[userIndex].name = userData.name;
+                    if (userData.email) users[userIndex].email = userData.email.toLowerCase();
+                    if (userData.role && ['user', 'admin', 'superadmin'].includes(userData.role)) {
+                        // Don't allow demoting the last superadmin
+                        const superadminCount = users.filter(u => u.role === 'superadmin').length;
+                        if (users[userIndex].role === 'superadmin' && userData.role !== 'superadmin' && superadminCount <= 1) {
+                            continue; // Skip this update
+                        }
+                        users[userIndex].role = userData.role;
+                    }
+                }
+            }
+            
+            saveUsers(users);
+            res.json({ success: true, message: 'Users updated', count: users.length });
+        } else {
+            return res.status(400).json({ error: 'Invalid database type' });
+        }
+    } catch (error) {
+        console.error('Database update error:', error);
+        res.status(500).json({ error: 'Failed to update database' });
+    }
+});
+
 // Change password
 app.post('/api/admin/change-password', authenticateToken, async (req, res) => {
     try {

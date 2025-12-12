@@ -423,3 +423,193 @@ document.getElementById('changePasswordForm')?.addEventListener('submit', async 
 
 // Initialize on load
 checkAdminAccess();
+
+// ==================== DATABASE MANAGEMENT ====================
+
+let databaseData = null;
+
+// Load database info
+async function loadDatabase() {
+    try {
+        const response = await authFetch('/api/admin/database');
+        if (response && response.ok) {
+            databaseData = await response.json();
+            renderDatabaseView();
+        }
+    } catch (error) {
+        console.error('Error loading database:', error);
+        showToast('Failed to load database', 'error');
+    }
+}
+
+// Render database view
+function renderDatabaseView() {
+    if (!databaseData || !databaseData.databases) return;
+    
+    const { users, settings } = databaseData.databases;
+    
+    // Update counts
+    document.getElementById('userCount').textContent = users.recordCount || 0;
+    
+    // Update file info
+    const dbFileInfo = document.getElementById('dbFileInfo');
+    if (dbFileInfo) {
+        const usersSize = formatSize(users.size || 0);
+        const settingsSize = formatSize(settings.size || 0);
+        dbFileInfo.textContent = `Users: ${usersSize} | Settings: ${settingsSize} | Last modified: ${formatDate(users.modified)}`;
+    }
+    
+    // Render JSON in viewers
+    const usersEditor = document.getElementById('usersJsonEditor');
+    const settingsEditor = document.getElementById('settingsJsonEditor');
+    
+    if (usersEditor) {
+        usersEditor.value = JSON.stringify(users.data, null, 2);
+    }
+    if (settingsEditor) {
+        settingsEditor.value = JSON.stringify(settings.data, null, 2);
+    }
+}
+
+// Database tab switching
+document.querySelectorAll('.db-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.db-tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        
+        const db = btn.dataset.db;
+        document.querySelectorAll('.db-view').forEach(v => v.classList.remove('active'));
+        document.getElementById(`db${db.charAt(0).toUpperCase() + db.slice(1)}View`).classList.add('active');
+    });
+});
+
+// Download handlers
+document.getElementById('downloadUsersBtn')?.addEventListener('click', () => {
+    downloadDatabase('users');
+});
+
+document.getElementById('downloadSettingsBtn')?.addEventListener('click', () => {
+    downloadDatabase('settings');
+});
+
+document.getElementById('downloadAllBtn')?.addEventListener('click', () => {
+    downloadDatabase('all');
+});
+
+async function downloadDatabase(type) {
+    try {
+        const token = getToken();
+        const response = await fetch(`/api/admin/database/download/${type}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.ok) {
+            const blob = await response.blob();
+            const filename = type === 'all' ? `backup-${Date.now()}.json` : `${type}.json`;
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast(`Downloaded ${filename}`);
+        } else {
+            showToast('Download failed', 'error');
+        }
+    } catch (error) {
+        console.error('Download error:', error);
+        showToast('Download failed', 'error');
+    }
+}
+
+// Refresh database
+document.getElementById('refreshDatabaseBtn')?.addEventListener('click', loadDatabase);
+
+// Enable edit mode
+document.getElementById('enableEditMode')?.addEventListener('change', (e) => {
+    const editPanel = document.getElementById('editModePanel');
+    if (editPanel) {
+        editPanel.style.display = e.target.checked ? 'block' : 'none';
+        if (e.target.checked) {
+            loadEditableData();
+        }
+    }
+});
+
+// Load editable data
+function loadEditableData() {
+    const select = document.getElementById('editDbSelect');
+    const editor = document.getElementById('editJsonEditor');
+    
+    if (!databaseData || !select || !editor) return;
+    
+    const type = select.value;
+    if (type === 'settings') {
+        editor.value = JSON.stringify(databaseData.databases.settings.data, null, 2);
+    } else if (type === 'users') {
+        editor.value = JSON.stringify(databaseData.databases.users.data, null, 2);
+    }
+}
+
+document.getElementById('editDbSelect')?.addEventListener('change', loadEditableData);
+
+// Validate JSON
+document.getElementById('validateJsonBtn')?.addEventListener('click', () => {
+    const editor = document.getElementById('editJsonEditor');
+    try {
+        JSON.parse(editor.value);
+        showToast('✓ Valid JSON');
+    } catch (error) {
+        showToast('Invalid JSON: ' + error.message, 'error');
+    }
+});
+
+// Save database changes
+document.getElementById('saveDbChangesBtn')?.addEventListener('click', async () => {
+    const select = document.getElementById('editDbSelect');
+    const editor = document.getElementById('editJsonEditor');
+    
+    if (!select || !editor) return;
+    
+    const type = select.value;
+    let data;
+    
+    try {
+        data = JSON.parse(editor.value);
+    } catch (error) {
+        showToast('Invalid JSON: ' + error.message, 'error');
+        return;
+    }
+    
+    if (!confirm(`Are you sure you want to update the ${type} database? This action cannot be undone!`)) {
+        return;
+    }
+    
+    try {
+        const response = await authFetch(`/api/admin/database/${type}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data })
+        });
+        
+        if (response && response.ok) {
+            showToast(`${type} database updated successfully`);
+            loadDatabase(); // Refresh view
+        } else {
+            const result = await response.json();
+            showToast(result.error || 'Failed to update database', 'error');
+        }
+    } catch (error) {
+        console.error('Save error:', error);
+        showToast('Failed to save changes', 'error');
+    }
+});
+
+// Load database when database tab is shown
+document.querySelectorAll('.admin-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        if (btn.dataset.tab === 'database') {
+            loadDatabase();
+        }
+    });
+});
