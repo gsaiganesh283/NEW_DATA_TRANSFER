@@ -103,6 +103,15 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Handle reconnection request from guest
+  socket.on('request-reconnect', ({ roomCode }) => {
+    const room = rooms.get(roomCode);
+    if (room && room.host) {
+      console.log(`Reconnect requested for room: ${roomCode}`);
+      io.to(room.host).emit('reconnect-request', { peerId: socket.id });
+    }
+  });
+
   // Handle disconnect
   socket.on('disconnect', () => {
     console.log(`Client disconnected: ${socket.id}`);

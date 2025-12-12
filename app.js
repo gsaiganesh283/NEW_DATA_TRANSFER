@@ -8,17 +8,43 @@ const socket = io({
     transports: ['websocket', 'polling']
 });
 
-// WebRTC configuration with multiple STUN/TURN servers for better connectivity
+// WebRTC configuration with STUN and TURN servers for cross-region connectivity
 const rtcConfig = {
     iceServers: [
+        // Google STUN servers
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
-        { urls: 'stun:stun.stunprotocol.org:3478' }
+        // Open TURN servers for relay when direct connection fails
+        {
+            urls: 'turn:openrelay.metered.ca:80',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        },
+        {
+            urls: 'turn:openrelay.metered.ca:443',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        },
+        {
+            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        },
+        // Backup TURN servers
+        {
+            urls: 'turn:relay.metered.ca:80',
+            username: 'e8dd65f92ae8d16fcfdb802c',
+            credential: 'uWdWNmkhvyqTmFzS'
+        },
+        {
+            urls: 'turn:relay.metered.ca:443',
+            username: 'e8dd65f92ae8d16fcfdb802c',
+            credential: 'uWdWNmkhvyqTmFzS'
+        }
     ],
-    iceCandidatePoolSize: 10
+    iceCandidatePoolSize: 10,
+    iceTransportPolicy: 'all'  // Use 'relay' to force TURN if needed
 };
 
 // ICE candidate queue for handling candidates before remote description is set
@@ -32,6 +58,9 @@ let isHost = false;
 let fileQueue = [];
 let activeTransfers = new Map();
 let transferHistory = [];
+let connectionTimeout = null;
+let connectionRetries = 0;
+const MAX_RETRIES = 3;
 
 // DOM elements
 const setupSection = document.getElementById('setupSection');
@@ -190,6 +219,16 @@ function setupSocketListeners() {
     socket.on('error', (data) => {
         showError(data.message);
     });
+
+    // Handle reconnection request from guest (host only)
+    socket.on('reconnect-request', (data) => {
+        if (isHost) {
+            console.log('Received reconnect request, creating new offer...');
+            pendingIceCandidates = [];
+            createPeerConnection();
+            createOffer();
+        }
+    });
 }
 
 // WebRTC functions
@@ -199,11 +238,37 @@ function createPeerConnection() {
         peerConnection.close();
     }
     
+    // Clear any existing timeout
+    if (connectionTimeout) {
+        clearTimeout(connectionTimeout);
+    }
+    
     peerConnection = new RTCPeerConnection(rtcConfig);
+
+    // Set connection timeout (30 seconds)
+    connectionTimeout = setTimeout(() => {
+        if (peerConnection && peerConnection.connectionState !== 'connected') {
+            console.log('Connection timeout, retrying...');
+            if (connectionRetries < MAX_RETRIES) {
+                connectionRetries++;
+                showError(`Connection timeout. Retrying (${connectionRetries}/${MAX_RETRIES})...`);
+                retryConnection();
+            } else {
+                showError('Connection failed after multiple attempts. Please try again.');
+                disconnect();
+            }
+        }
+    }, 30000);
+
+    // ICE gathering state
+    peerConnection.onicegatheringstatechange = () => {
+        console.log('ICE gathering state:', peerConnection.iceGatheringState);
+    };
 
     // ICE candidate handling
     peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
+            console.log('ICE candidate type:', event.candidate.type);
             socket.emit('ice-candidate', {
                 candidate: event.candidate,
                 roomCode
@@ -212,7 +277,7 @@ function createPeerConnection() {
     };
 
     peerConnection.onicecandidateerror = (event) => {
-        console.error('ICE candidate error:', event);
+        console.error('ICE candidate error:', event.errorCode, event.errorText);
     };
 
     peerConnection.oniceconnectionstatechange = () => {
@@ -221,6 +286,13 @@ function createPeerConnection() {
         if (peerConnection.iceConnectionState === 'failed') {
             console.log('ICE connection failed, attempting restart...');
             peerConnection.restartIce();
+        } else if (peerConnection.iceConnectionState === 'connected') {
+            // Clear timeout on successful connection
+            if (connectionTimeout) {
+                clearTimeout(connectionTimeout);
+                connectionTimeout = null;
+            }
+            connectionRetries = 0;
         }
     };
 
@@ -228,6 +300,12 @@ function createPeerConnection() {
         console.log('Connection state:', peerConnection.connectionState);
         
         if (peerConnection.connectionState === 'connected') {
+            // Clear timeout on successful connection
+            if (connectionTimeout) {
+                clearTimeout(connectionTimeout);
+                connectionTimeout = null;
+            }
+            connectionRetries = 0;
             updateStatus('connected', 'Peer connected');
             showSection('transferSection');
             showSuccess('Connected! You can now transfer files.');
@@ -235,8 +313,14 @@ function createPeerConnection() {
             updateStatus('connecting', 'Reconnecting...');
             showError('Connection interrupted. Attempting to reconnect...');
         } else if (peerConnection.connectionState === 'failed') {
-            showError('Connection failed. Please try again.');
-            disconnect();
+            if (connectionRetries < MAX_RETRIES) {
+                connectionRetries++;
+                showError(`Connection failed. Retrying (${connectionRetries}/${MAX_RETRIES})...`);
+                retryConnection();
+            } else {
+                showError('Connection failed. Please try again.');
+                disconnect();
+            }
         }
     };
 
@@ -251,6 +335,17 @@ function createPeerConnection() {
             dataChannel = event.channel;
             setupDataChannel();
         };
+    }
+}
+
+function retryConnection() {
+    if (isHost) {
+        pendingIceCandidates = [];
+        createPeerConnection();
+        createOffer();
+    } else {
+        // Guest needs to wait for new offer from host
+        socket.emit('request-reconnect', { roomCode });
     }
 }
 
