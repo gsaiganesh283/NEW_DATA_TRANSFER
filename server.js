@@ -11,7 +11,11 @@ const io = socketIo(server, {
     origin: "*",
     methods: ["GET", "POST"]
   },
-  maxHttpBufferSize: 1e8 // 100 MB
+  maxHttpBufferSize: 1e8, // 100 MB
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  transports: ['websocket', 'polling'],
+  allowUpgrades: true
 });
 
 // Middleware

@@ -1,13 +1,28 @@
-// Socket.io connection
-const socket = io();
+// Socket.io connection with reconnection options
+const socket = io({
+    reconnection: true,
+    reconnectionAttempts: 10,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+    timeout: 20000,
+    transports: ['websocket', 'polling']
+});
 
-// WebRTC configuration
+// WebRTC configuration with multiple STUN/TURN servers for better connectivity
 const rtcConfig = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-    ]
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
+        { urls: 'stun:stun.stunprotocol.org:3478' }
+    ],
+    iceCandidatePoolSize: 10
 };
+
+// ICE candidate queue for handling candidates before remote description is set
+let pendingIceCandidates = [];
 
 // Application state
 let peerConnection = null;
@@ -111,25 +126,59 @@ function setupSocketListeners() {
 
     socket.on('peer-joined', (data) => {
         showSuccess('Peer joined! Establishing connection...');
+        pendingIceCandidates = [];
         createPeerConnection();
         createOffer();
     });
 
     socket.on('offer', async (data) => {
-        createPeerConnection();
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-        const answer = await peerConnection.createAnswer();
-        await peerConnection.setLocalDescription(answer);
-        socket.emit('answer', { answer, roomCode });
+        try {
+            pendingIceCandidates = [];
+            createPeerConnection();
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+            
+            // Process any pending ICE candidates
+            for (const candidate of pendingIceCandidates) {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+            }
+            pendingIceCandidates = [];
+            
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            socket.emit('answer', { answer, roomCode });
+        } catch (error) {
+            console.error('Error handling offer:', error);
+            showError('Connection failed. Please try again.');
+        }
     });
 
     socket.on('answer', async (data) => {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+        try {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+            
+            // Process any pending ICE candidates
+            for (const candidate of pendingIceCandidates) {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+            }
+            pendingIceCandidates = [];
+        } catch (error) {
+            console.error('Error handling answer:', error);
+            showError('Connection failed. Please try again.');
+        }
     });
 
     socket.on('ice-candidate', async (data) => {
-        if (peerConnection && data.candidate) {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+        if (!data.candidate) return;
+        
+        try {
+            if (peerConnection && peerConnection.remoteDescription) {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+            } else {
+                // Queue the candidate if remote description isn't set yet
+                pendingIceCandidates.push(data.candidate);
+            }
+        } catch (error) {
+            console.error('Error adding ICE candidate:', error);
         }
     });
 
@@ -145,6 +194,11 @@ function setupSocketListeners() {
 
 // WebRTC functions
 function createPeerConnection() {
+    // Clean up existing connection
+    if (peerConnection) {
+        peerConnection.close();
+    }
+    
     peerConnection = new RTCPeerConnection(rtcConfig);
 
     // ICE candidate handling
@@ -157,6 +211,19 @@ function createPeerConnection() {
         }
     };
 
+    peerConnection.onicecandidateerror = (event) => {
+        console.error('ICE candidate error:', event);
+    };
+
+    peerConnection.oniceconnectionstatechange = () => {
+        console.log('ICE connection state:', peerConnection.iceConnectionState);
+        
+        if (peerConnection.iceConnectionState === 'failed') {
+            console.log('ICE connection failed, attempting restart...');
+            peerConnection.restartIce();
+        }
+    };
+
     peerConnection.onconnectionstatechange = () => {
         console.log('Connection state:', peerConnection.connectionState);
         
@@ -164,9 +231,11 @@ function createPeerConnection() {
             updateStatus('connected', 'Peer connected');
             showSection('transferSection');
             showSuccess('Connected! You can now transfer files.');
-        } else if (peerConnection.connectionState === 'disconnected' || 
-                   peerConnection.connectionState === 'failed') {
-            showError('Connection lost');
+        } else if (peerConnection.connectionState === 'disconnected') {
+            updateStatus('connecting', 'Reconnecting...');
+            showError('Connection interrupted. Attempting to reconnect...');
+        } else if (peerConnection.connectionState === 'failed') {
+            showError('Connection failed. Please try again.');
             disconnect();
         }
     };
