@@ -243,12 +243,58 @@ document.querySelectorAll('.admin-tab-btn').forEach(btn => {
         const tab = btn.dataset.tab;
         document.querySelectorAll('.admin-section').forEach(s => s.classList.remove('active'));
         document.getElementById(`${tab}Section`).classList.add('active');
+        
+        // Load settings when switching to settings tab
+        if (tab === 'settings') {
+            loadSettings();
+        }
     });
 });
+
+// Load current settings
+async function loadSettings() {
+    try {
+        const response = await authFetch('/api/admin/settings');
+        if (response && response.ok) {
+            const data = await response.json();
+            const settings = data.settings;
+            
+            // Populate transfer settings
+            document.getElementById('maxFileSize').value = settings.maxFileSize || 2000;
+            document.getElementById('maxFiles').value = settings.maxFiles || 50;
+            document.getElementById('expiryTime').value = settings.expiryTime || 24;
+            document.getElementById('allowAnonymous').checked = settings.allowAnonymous !== false;
+            
+            // Populate storage settings
+            document.getElementById('storagePath').value = settings.storagePath || 'uploads';
+            document.getElementById('enableCloudStorage').checked = settings.enableCloudStorage || false;
+            document.getElementById('cloudProvider').value = settings.cloudProvider || 'local';
+            document.getElementById('cloudBucket').value = settings.cloudBucket || '';
+            document.getElementById('cloudRegion').value = settings.cloudRegion || '';
+            
+            // Toggle cloud settings visibility
+            toggleCloudSettings();
+        }
+    } catch (error) {
+        console.error('Error loading settings:', error);
+    }
+}
+
+// Toggle cloud settings visibility
+function toggleCloudSettings() {
+    const enableCloud = document.getElementById('enableCloudStorage').checked;
+    const cloudSettings = document.getElementById('cloudSettings');
+    if (cloudSettings) {
+        cloudSettings.style.display = enableCloud ? 'block' : 'none';
+    }
+}
 
 // Refresh buttons
 document.getElementById('refreshUsersBtn')?.addEventListener('click', loadUsers);
 document.getElementById('refreshTransfersBtn')?.addEventListener('click', loadTransfers);
+
+// Cloud storage toggle
+document.getElementById('enableCloudStorage')?.addEventListener('change', toggleCloudSettings);
 
 // Logout button
 document.getElementById('logoutBtn')?.addEventListener('click', logout);
@@ -283,7 +329,7 @@ document.getElementById('editUserForm')?.addEventListener('submit', async (e) =>
     }
 });
 
-// Settings form
+// Settings form (Transfer settings)
 document.getElementById('settingsForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     
@@ -302,13 +348,43 @@ document.getElementById('settingsForm')?.addEventListener('submit', async (e) =>
         });
 
         if (response && response.ok) {
-            showToast('Settings saved successfully');
+            showToast('Transfer settings saved successfully');
         } else {
             showToast('Failed to save settings', 'error');
         }
     } catch (error) {
         console.error('Error saving settings:', error);
         showToast('Failed to save settings', 'error');
+    }
+});
+
+// Storage settings form
+document.getElementById('storageForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const settings = {
+        storagePath: document.getElementById('storagePath').value,
+        enableCloudStorage: document.getElementById('enableCloudStorage').checked,
+        cloudProvider: document.getElementById('cloudProvider').value,
+        cloudBucket: document.getElementById('cloudBucket').value,
+        cloudRegion: document.getElementById('cloudRegion').value
+    };
+
+    try {
+        const response = await authFetch('/api/admin/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+
+        if (response && response.ok) {
+            showToast('Storage settings saved successfully');
+        } else {
+            showToast('Failed to save storage settings', 'error');
+        }
+    } catch (error) {
+        console.error('Error saving storage settings:', error);
+        showToast('Failed to save storage settings', 'error');
     }
 });
 

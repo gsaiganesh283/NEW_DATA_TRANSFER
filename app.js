@@ -65,14 +65,52 @@ fileInput.addEventListener('change', (e) => {
     handleFiles(e.target.files);
 });
 
+// Dynamic settings (will be loaded from server)
+let appSettings = {
+    maxFileSize: 2000, // MB (2GB default)
+    maxFiles: 50
+};
+
+// Load settings from server
+async function loadAppSettings() {
+    try {
+        const response = await fetch('/api/settings');
+        if (response.ok) {
+            const data = await response.json();
+            appSettings = data.settings;
+            updateUploadZoneText();
+        }
+    } catch (error) {
+        console.log('Using default settings');
+    }
+}
+
+function updateUploadZoneText() {
+    const uploadZoneText = document.querySelector('.upload-zone p');
+    if (uploadZoneText) {
+        const maxSizeText = appSettings.maxFileSize >= 1000 
+            ? `${(appSettings.maxFileSize / 1000).toFixed(1)}GB` 
+            : `${appSettings.maxFileSize}MB`;
+        uploadZoneText.textContent = `Maximum ${maxSizeText} per file, up to ${appSettings.maxFiles} files`;
+    }
+}
+
+// Load settings on page load
+loadAppSettings();
+
 function handleFiles(files) {
+    const maxSizeBytes = appSettings.maxFileSize * 1024 * 1024;
+    const maxSizeText = appSettings.maxFileSize >= 1000 
+        ? `${(appSettings.maxFileSize / 1000).toFixed(1)}GB` 
+        : `${appSettings.maxFileSize}MB`;
+    
     for (const file of files) {
-        if (file.size > 500 * 1024 * 1024) {
-            showToast(`${file.name} is too large (max 500MB)`, 'error');
+        if (file.size > maxSizeBytes) {
+            showToast(`${file.name} is too large (max ${maxSizeText})`, 'error');
             continue;
         }
-        if (selectedFiles.length >= 10) {
-            showToast('Maximum 10 files allowed', 'error');
+        if (selectedFiles.length >= appSettings.maxFiles) {
+            showToast(`Maximum ${appSettings.maxFiles} files allowed`, 'error');
             break;
         }
         if (!selectedFiles.find(f => f.name === file.name)) {

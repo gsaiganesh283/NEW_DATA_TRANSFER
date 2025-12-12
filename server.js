@@ -74,29 +74,84 @@ initializeSuperAdmin();
 // Store file metadata
 const fileStore = new Map();
 
-// System settings
-let systemSettings = {
-    maxFileSize: 500, // MB
-    maxFiles: 10,
-    expiryTime: 1, // hours
-    allowAnonymous: true
-};
+// Settings file for persistence
+const settingsFile = path.join(dataDir, 'settings.json');
 
-// Configure multer for file uploads
+// Load settings from file or use defaults
+function loadSettings() {
+    try {
+        if (fs.existsSync(settingsFile)) {
+            return JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+        }
+    } catch (error) {
+        console.error('Error loading settings:', error);
+    }
+    return {
+        maxFileSize: 2000, // MB (2GB)
+        maxFiles: 50,
+        expiryTime: 24, // hours
+        allowAnonymous: true,
+        storagePath: 'uploads', // relative to app directory or absolute path
+        enableCloudStorage: false,
+        cloudProvider: 'local', // local, s3, gcs, azure
+        cloudBucket: '',
+        cloudRegion: ''
+    };
+}
+
+function saveSettings(settings) {
+    fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
+}
+
+// System settings
+let systemSettings = loadSettings();
+
+// Get current upload directory based on settings
+function getUploadDir() {
+    let uploadPath = systemSettings.storagePath || 'uploads';
+    
+    // If relative path, make it relative to app directory
+    if (!path.isAbsolute(uploadPath)) {
+        uploadPath = path.join(__dirname, uploadPath);
+    }
+    
+    // Ensure directory exists
+    if (!fs.existsSync(uploadPath)) {
+        fs.mkdirSync(uploadPath, { recursive: true });
+    }
+    
+    return uploadPath;
+}
+
+// Configure multer for file uploads with dynamic settings
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        cb(null, uploadsDir);
+        cb(null, getUploadDir());
     },
     filename: (req, file, cb) => {
+        // Create date-based subdirectory for organization
+        const date = new Date();
+        const dateDir = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+        const fullDir = path.join(getUploadDir(), dateDir);
+        
+        if (!fs.existsSync(fullDir)) {
+            fs.mkdirSync(fullDir, { recursive: true });
+        }
+        
         const uniqueName = crypto.randomBytes(16).toString('hex') + path.extname(file.originalname);
-        cb(null, uniqueName);
+        cb(null, path.join(dateDir, uniqueName));
     }
 });
 
-const upload = multer({ 
-    storage: storage,
-    limits: { fileSize: systemSettings.maxFileSize * 1024 * 1024 }
-});
+// Create upload middleware with current settings
+function createUploadMiddleware() {
+    return multer({ 
+        storage: storage,
+        limits: { fileSize: (systemSettings.maxFileSize || 2000) * 1024 * 1024 }
+    });
+}
+
+let upload = createUploadMiddleware();
 
 // Middleware
 app.use(cors({
@@ -541,14 +596,37 @@ app.delete('/api/admin/transfers/:code', authenticateToken, requireAdmin, (req, 
 
 // Update settings
 app.put('/api/admin/settings', authenticateToken, requireSuperAdmin, (req, res) => {
-    const { maxFileSize, maxFiles, expiryTime, allowAnonymous } = req.body;
+    const { maxFileSize, maxFiles, expiryTime, allowAnonymous, storagePath, enableCloudStorage, cloudProvider, cloudBucket, cloudRegion } = req.body;
     
-    if (maxFileSize) systemSettings.maxFileSize = maxFileSize;
-    if (maxFiles) systemSettings.maxFiles = maxFiles;
-    if (expiryTime) systemSettings.expiryTime = expiryTime;
+    if (maxFileSize) systemSettings.maxFileSize = parseInt(maxFileSize);
+    if (maxFiles) systemSettings.maxFiles = parseInt(maxFiles);
+    if (expiryTime) systemSettings.expiryTime = parseInt(expiryTime);
     if (typeof allowAnonymous === 'boolean') systemSettings.allowAnonymous = allowAnonymous;
+    if (storagePath) {
+        systemSettings.storagePath = storagePath;
+        // Ensure the new storage directory exists
+        const fullPath = path.isAbsolute(storagePath) ? storagePath : path.join(__dirname, storagePath);
+        if (!fs.existsSync(fullPath)) {
+            fs.mkdirSync(fullPath, { recursive: true });
+        }
+    }
+    if (typeof enableCloudStorage === 'boolean') systemSettings.enableCloudStorage = enableCloudStorage;
+    if (cloudProvider) systemSettings.cloudProvider = cloudProvider;
+    if (cloudBucket !== undefined) systemSettings.cloudBucket = cloudBucket;
+    if (cloudRegion !== undefined) systemSettings.cloudRegion = cloudRegion;
+    
+    // Persist settings to file
+    saveSettings(systemSettings);
+    
+    // Update upload middleware
+    upload = createUploadMiddleware();
     
     res.json({ success: true, settings: systemSettings });
+});
+
+// Get current settings
+app.get('/api/admin/settings', authenticateToken, requireAdmin, (req, res) => {
+    res.json({ settings: systemSettings });
 });
 
 // Change password
@@ -594,8 +672,15 @@ app.post('/api/admin/change-password', authenticateToken, async (req, res) => {
 
 // ==================== FILE TRANSFER API ROUTES ====================
 
-// Upload file(s)
-app.post('/api/upload', optionalAuth, upload.array('files', systemSettings.maxFiles), (req, res) => {
+// Upload file(s) - using dynamic middleware for current settings
+app.post('/api/upload', optionalAuth, (req, res, next) => {
+    // Recreate upload middleware with current settings
+    const currentUpload = multer({
+        storage: storage,
+        limits: { fileSize: (systemSettings.maxFileSize || 2000) * 1024 * 1024 }
+    });
+    currentUpload.array('files', systemSettings.maxFiles || 50)(req, res, next);
+}, (req, res) => {
     try {
         if (!systemSettings.allowAnonymous && !req.user) {
             return res.status(401).json({ error: 'Login required to upload files' });
@@ -705,6 +790,18 @@ app.delete('/api/files/:code', (req, res) => {
     console.log(`Transfer deleted: ${code}`);
     
     res.json({ success: true, message: 'Files deleted' });
+});
+
+// Public settings endpoint (limited info for frontend)
+app.get('/api/settings', (req, res) => {
+    res.json({
+        settings: {
+            maxFileSize: systemSettings.maxFileSize,
+            maxFiles: systemSettings.maxFiles,
+            expiryTime: systemSettings.expiryTime,
+            allowAnonymous: systemSettings.allowAnonymous
+        }
+    });
 });
 
 // Health check
