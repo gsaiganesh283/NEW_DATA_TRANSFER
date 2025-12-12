@@ -5,18 +5,82 @@ const path = require('path');
 const multer = require('multer');
 const fs = require('fs');
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 const server = http.createServer(app);
 
-// Create uploads directory if it doesn't exist
+// JWT Secret (in production, use environment variable)
+const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production';
+const JWT_EXPIRES_IN = '7d';
+
+// Google OAuth Configuration (set these in environment variables)
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+const GOOGLE_CALLBACK_URL = process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3000/auth/google/callback';
+
+// Create directories if they don't exist
 const uploadsDir = path.join(__dirname, 'uploads');
+const dataDir = path.join(__dirname, 'data');
 if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
 }
+if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+}
+
+// Simple file-based database for users
+const usersFile = path.join(dataDir, 'users.json');
+
+function loadUsers() {
+    try {
+        if (fs.existsSync(usersFile)) {
+            return JSON.parse(fs.readFileSync(usersFile, 'utf8'));
+        }
+    } catch (error) {
+        console.error('Error loading users:', error);
+    }
+    return [];
+}
+
+function saveUsers(users) {
+    fs.writeFileSync(usersFile, JSON.stringify(users, null, 2));
+}
+
+// Initialize with superadmin if not exists
+function initializeSuperAdmin() {
+    let users = loadUsers();
+    const superadmin = users.find(u => u.role === 'superadmin');
+    
+    if (!superadmin) {
+        const hashedPassword = bcrypt.hashSync('admin123', 10);
+        users.push({
+            id: crypto.randomUUID(),
+            name: 'Super Admin',
+            email: 'admin@filetransfer.com',
+            password: hashedPassword,
+            role: 'superadmin',
+            provider: 'local',
+            createdAt: new Date().toISOString()
+        });
+        saveUsers(users);
+        console.log('Super Admin created with email: admin@filetransfer.com and password: admin123');
+    }
+}
+
+initializeSuperAdmin();
 
 // Store file metadata
 const fileStore = new Map();
+
+// System settings
+let systemSettings = {
+    maxFileSize: 500, // MB
+    maxFiles: 10,
+    expiryTime: 1, // hours
+    allowAnonymous: true
+};
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -31,13 +95,13 @@ const storage = multer.diskStorage({
 
 const upload = multer({ 
     storage: storage,
-    limits: { fileSize: 500 * 1024 * 1024 } // 500MB limit
+    limits: { fileSize: systemSettings.maxFileSize * 1024 * 1024 }
 });
 
 // Middleware
 app.use(cors({
     origin: '*',
-    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true
 }));
 app.use(express.json());
@@ -48,14 +112,71 @@ function generateTransferCode() {
     return crypto.randomBytes(3).toString('hex').toUpperCase();
 }
 
-// Clean up expired files (older than 1 hour)
+// Generate JWT token
+function generateToken(user) {
+    return jwt.sign(
+        { id: user.id, email: user.email, role: user.role },
+        JWT_SECRET,
+        { expiresIn: JWT_EXPIRES_IN }
+    );
+}
+
+// Auth Middleware
+function authenticateToken(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+        return res.status(401).json({ error: 'Access token required' });
+    }
+
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) {
+            return res.status(401).json({ error: 'Invalid or expired token' });
+        }
+        req.user = user;
+        next();
+    });
+}
+
+// Admin Middleware
+function requireAdmin(req, res, next) {
+    if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
+        return res.status(403).json({ error: 'Admin access required' });
+    }
+    next();
+}
+
+// SuperAdmin Middleware
+function requireSuperAdmin(req, res, next) {
+    if (req.user.role !== 'superadmin') {
+        return res.status(403).json({ error: 'Super Admin access required' });
+    }
+    next();
+}
+
+// Optional Auth Middleware (for uploads that can be anonymous)
+function optionalAuth(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (token) {
+        jwt.verify(token, JWT_SECRET, (err, user) => {
+            if (!err) {
+                req.user = user;
+            }
+        });
+    }
+    next();
+}
+
+// Clean up expired files
 function cleanupExpiredFiles() {
     const now = Date.now();
-    const oneHour = 60 * 60 * 1000;
+    const expiryMs = systemSettings.expiryTime * 60 * 60 * 1000;
     
     for (const [code, fileInfo] of fileStore.entries()) {
-        if (now - fileInfo.uploadedAt > oneHour) {
-            // Delete files from disk
+        if (now - fileInfo.uploadedAt > expiryMs) {
             fileInfo.files.forEach(file => {
                 if (fs.existsSync(file.path)) {
                     fs.unlinkSync(file.path);
@@ -67,14 +188,419 @@ function cleanupExpiredFiles() {
     }
 }
 
-// Run cleanup every 10 minutes
 setInterval(cleanupExpiredFiles, 10 * 60 * 1000);
 
-// API Routes
+// ==================== AUTH ROUTES ====================
+
+// Signup
+app.post('/auth/signup', async (req, res) => {
+    try {
+        const { name, email, password } = req.body;
+
+        if (!email || !password) {
+            return res.status(400).json({ error: 'Email and password are required' });
+        }
+
+        if (password.length < 6) {
+            return res.status(400).json({ error: 'Password must be at least 6 characters' });
+        }
+
+        let users = loadUsers();
+        
+        if (users.find(u => u.email.toLowerCase() === email.toLowerCase())) {
+            return res.status(400).json({ error: 'Email already registered' });
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const newUser = {
+            id: crypto.randomUUID(),
+            name: name || email.split('@')[0],
+            email: email.toLowerCase(),
+            password: hashedPassword,
+            role: 'user',
+            provider: 'local',
+            createdAt: new Date().toISOString()
+        };
+
+        users.push(newUser);
+        saveUsers(users);
+
+        const token = generateToken(newUser);
+        const userResponse = { ...newUser };
+        delete userResponse.password;
+
+        res.json({ token, user: userResponse });
+    } catch (error) {
+        console.error('Signup error:', error);
+        res.status(500).json({ error: 'Signup failed' });
+    }
+});
+
+// Login
+app.post('/auth/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        if (!email || !password) {
+            return res.status(400).json({ error: 'Email and password are required' });
+        }
+
+        const users = loadUsers();
+        const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+
+        if (!user) {
+            return res.status(401).json({ error: 'Invalid email or password' });
+        }
+
+        if (user.provider === 'google') {
+            return res.status(401).json({ error: 'Please login with Google' });
+        }
+
+        const validPassword = await bcrypt.compare(password, user.password);
+        if (!validPassword) {
+            return res.status(401).json({ error: 'Invalid email or password' });
+        }
+
+        const token = generateToken(user);
+        const userResponse = { ...user };
+        delete userResponse.password;
+
+        res.json({ token, user: userResponse });
+    } catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({ error: 'Login failed' });
+    }
+});
+
+// Verify token
+app.get('/auth/verify', authenticateToken, (req, res) => {
+    const users = loadUsers();
+    const user = users.find(u => u.id === req.user.id);
+    
+    if (!user) {
+        return res.status(401).json({ error: 'User not found' });
+    }
+
+    const userResponse = { ...user };
+    delete userResponse.password;
+    
+    res.json({ valid: true, user: userResponse });
+});
+
+// Logout (client-side handles this, but we can log it)
+app.post('/auth/logout', authenticateToken, (req, res) => {
+    res.json({ success: true });
+});
+
+// ==================== GOOGLE OAUTH ROUTES ====================
+
+// Google OAuth - Redirect to Google
+app.get('/auth/google', (req, res) => {
+    if (!GOOGLE_CLIENT_ID) {
+        return res.status(500).send(`
+            <html>
+            <body style="font-family: sans-serif; text-align: center; padding: 50px;">
+                <h2>Google OAuth Not Configured</h2>
+                <p>Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables.</p>
+                <a href="/login.html">Back to Login</a>
+            </body>
+            </html>
+        `);
+    }
+
+    const scope = encodeURIComponent('email profile');
+    const redirectUri = encodeURIComponent(GOOGLE_CALLBACK_URL);
+    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&access_type=offline`;
+    
+    res.redirect(googleAuthUrl);
+});
+
+// Google OAuth Callback
+app.get('/auth/google/callback', async (req, res) => {
+    try {
+        const { code } = req.query;
+
+        if (!code) {
+            return res.redirect('/login.html?error=oauth_failed');
+        }
+
+        // Exchange code for tokens
+        const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                code,
+                client_id: GOOGLE_CLIENT_ID,
+                client_secret: GOOGLE_CLIENT_SECRET,
+                redirect_uri: GOOGLE_CALLBACK_URL,
+                grant_type: 'authorization_code'
+            })
+        });
+
+        const tokens = await tokenResponse.json();
+
+        if (!tokens.access_token) {
+            console.error('Token exchange failed:', tokens);
+            return res.redirect('/login.html?error=oauth_failed');
+        }
+
+        // Get user info
+        const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+            headers: { Authorization: `Bearer ${tokens.access_token}` }
+        });
+
+        const googleUser = await userInfoResponse.json();
+
+        if (!googleUser.email) {
+            return res.redirect('/login.html?error=oauth_failed');
+        }
+
+        let users = loadUsers();
+        let user = users.find(u => u.email.toLowerCase() === googleUser.email.toLowerCase());
+
+        if (!user) {
+            // Create new user
+            user = {
+                id: crypto.randomUUID(),
+                name: googleUser.name || googleUser.email.split('@')[0],
+                email: googleUser.email.toLowerCase(),
+                avatar: googleUser.picture,
+                role: 'user',
+                provider: 'google',
+                googleId: googleUser.id,
+                createdAt: new Date().toISOString()
+            };
+            users.push(user);
+            saveUsers(users);
+        } else if (user.provider !== 'google') {
+            // Link Google to existing account
+            user.googleId = googleUser.id;
+            user.avatar = googleUser.picture;
+            user.provider = 'google';
+            saveUsers(users);
+        }
+
+        const token = generateToken(user);
+        const userResponse = { ...user };
+        delete userResponse.password;
+
+        // Redirect with token
+        const userStr = encodeURIComponent(JSON.stringify(userResponse));
+        res.redirect(`/index.html?token=${token}&user=${userStr}`);
+    } catch (error) {
+        console.error('Google OAuth error:', error);
+        res.redirect('/login.html?error=oauth_failed');
+    }
+});
+
+// ==================== ADMIN API ROUTES ====================
+
+// Get admin stats
+app.get('/api/admin/stats', authenticateToken, requireAdmin, (req, res) => {
+    const users = loadUsers();
+    
+    let totalSize = 0;
+    let totalDownloads = 0;
+    
+    for (const [code, info] of fileStore.entries()) {
+        info.files.forEach(f => totalSize += f.size);
+        totalDownloads += info.downloadCount;
+    }
+
+    res.json({
+        totalUsers: users.length,
+        activeTransfers: fileStore.size,
+        totalDownloads,
+        storageUsed: totalSize
+    });
+});
+
+// Get all users
+app.get('/api/admin/users', authenticateToken, requireAdmin, (req, res) => {
+    const users = loadUsers().map(u => {
+        const user = { ...u };
+        delete user.password;
+        return user;
+    });
+    res.json({ users });
+});
+
+// Get single user
+app.get('/api/admin/users/:id', authenticateToken, requireAdmin, (req, res) => {
+    const users = loadUsers();
+    const user = users.find(u => u.id === req.params.id);
+    
+    if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+    }
+
+    const userResponse = { ...user };
+    delete userResponse.password;
+    res.json(userResponse);
+});
+
+// Update user
+app.put('/api/admin/users/:id', authenticateToken, requireAdmin, (req, res) => {
+    let users = loadUsers();
+    const userIndex = users.findIndex(u => u.id === req.params.id);
+    
+    if (userIndex === -1) {
+        return res.status(404).json({ error: 'User not found' });
+    }
+
+    const targetUser = users[userIndex];
+    
+    // Prevent demoting superadmin unless you're superadmin
+    if (targetUser.role === 'superadmin' && req.user.role !== 'superadmin') {
+        return res.status(403).json({ error: 'Cannot modify super admin' });
+    }
+
+    // Prevent promoting to superadmin unless you're superadmin
+    if (req.body.role === 'superadmin' && req.user.role !== 'superadmin') {
+        return res.status(403).json({ error: 'Cannot assign super admin role' });
+    }
+
+    const { name, email, role } = req.body;
+    
+    if (name) users[userIndex].name = name;
+    if (email) users[userIndex].email = email.toLowerCase();
+    if (role && (req.user.role === 'superadmin' || role !== 'superadmin')) {
+        users[userIndex].role = role;
+    }
+
+    saveUsers(users);
+    
+    const userResponse = { ...users[userIndex] };
+    delete userResponse.password;
+    res.json(userResponse);
+});
+
+// Delete user
+app.delete('/api/admin/users/:id', authenticateToken, requireAdmin, (req, res) => {
+    let users = loadUsers();
+    const userIndex = users.findIndex(u => u.id === req.params.id);
+    
+    if (userIndex === -1) {
+        return res.status(404).json({ error: 'User not found' });
+    }
+
+    const targetUser = users[userIndex];
+    
+    if (targetUser.role === 'superadmin') {
+        return res.status(403).json({ error: 'Cannot delete super admin' });
+    }
+
+    if (targetUser.id === req.user.id) {
+        return res.status(403).json({ error: 'Cannot delete yourself' });
+    }
+
+    users.splice(userIndex, 1);
+    saveUsers(users);
+    
+    res.json({ success: true });
+});
+
+// Get all transfers
+app.get('/api/admin/transfers', authenticateToken, requireAdmin, (req, res) => {
+    const transfers = [];
+    const expiryMs = systemSettings.expiryTime * 60 * 60 * 1000;
+    
+    for (const [code, info] of fileStore.entries()) {
+        transfers.push({
+            code,
+            fileCount: info.files.length,
+            totalSize: info.files.reduce((sum, f) => sum + f.size, 0),
+            downloadCount: info.downloadCount,
+            uploadedBy: info.uploadedBy || 'Anonymous',
+            uploadedAt: info.uploadedAt,
+            expiresAt: new Date(info.uploadedAt + expiryMs).toISOString()
+        });
+    }
+    
+    res.json({ transfers });
+});
+
+// Delete transfer (admin)
+app.delete('/api/admin/transfers/:code', authenticateToken, requireAdmin, (req, res) => {
+    const code = req.params.code.toUpperCase();
+    const fileInfo = fileStore.get(code);
+    
+    if (!fileInfo) {
+        return res.status(404).json({ error: 'Transfer not found' });
+    }
+
+    fileInfo.files.forEach(file => {
+        if (fs.existsSync(file.path)) {
+            fs.unlinkSync(file.path);
+        }
+    });
+    
+    fileStore.delete(code);
+    res.json({ success: true });
+});
+
+// Update settings
+app.put('/api/admin/settings', authenticateToken, requireSuperAdmin, (req, res) => {
+    const { maxFileSize, maxFiles, expiryTime, allowAnonymous } = req.body;
+    
+    if (maxFileSize) systemSettings.maxFileSize = maxFileSize;
+    if (maxFiles) systemSettings.maxFiles = maxFiles;
+    if (expiryTime) systemSettings.expiryTime = expiryTime;
+    if (typeof allowAnonymous === 'boolean') systemSettings.allowAnonymous = allowAnonymous;
+    
+    res.json({ success: true, settings: systemSettings });
+});
+
+// Change password
+app.post('/api/admin/change-password', authenticateToken, async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+        
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ error: 'Current and new password required' });
+        }
+
+        if (newPassword.length < 6) {
+            return res.status(400).json({ error: 'Password must be at least 6 characters' });
+        }
+
+        let users = loadUsers();
+        const userIndex = users.findIndex(u => u.id === req.user.id);
+        
+        if (userIndex === -1) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        const user = users[userIndex];
+        
+        if (user.provider === 'google') {
+            return res.status(400).json({ error: 'Cannot change password for Google accounts' });
+        }
+
+        const validPassword = await bcrypt.compare(currentPassword, user.password);
+        if (!validPassword) {
+            return res.status(401).json({ error: 'Current password is incorrect' });
+        }
+
+        users[userIndex].password = await bcrypt.hash(newPassword, 10);
+        saveUsers(users);
+        
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Change password error:', error);
+        res.status(500).json({ error: 'Failed to change password' });
+    }
+});
+
+// ==================== FILE TRANSFER API ROUTES ====================
 
 // Upload file(s)
-app.post('/api/upload', upload.array('files', 10), (req, res) => {
+app.post('/api/upload', optionalAuth, upload.array('files', systemSettings.maxFiles), (req, res) => {
     try {
+        if (!systemSettings.allowAnonymous && !req.user) {
+            return res.status(401).json({ error: 'Login required to upload files' });
+        }
+
         if (!req.files || req.files.length === 0) {
             return res.status(400).json({ error: 'No files uploaded' });
         }
@@ -91,7 +617,8 @@ app.post('/api/upload', upload.array('files', 10), (req, res) => {
         fileStore.set(transferCode, {
             files: files,
             uploadedAt: Date.now(),
-            downloadCount: 0
+            downloadCount: 0,
+            uploadedBy: req.user ? req.user.email : null
         });
 
         console.log(`Files uploaded with code: ${transferCode}, count: ${files.length}`);
@@ -101,7 +628,7 @@ app.post('/api/upload', upload.array('files', 10), (req, res) => {
             transferCode: transferCode,
             fileCount: files.length,
             totalSize: files.reduce((sum, f) => sum + f.size, 0),
-            expiresIn: '1 hour'
+            expiresIn: `${systemSettings.expiryTime} hour(s)`
         });
     } catch (error) {
         console.error('Upload error:', error);
@@ -188,6 +715,11 @@ app.get('/health', (req, res) => {
     });
 });
 
+// Serve pages
+app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
+app.get('/signup', (req, res) => res.sendFile(path.join(__dirname, 'signup.html')));
+app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
+
 // Serve index.html for all other routes
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
@@ -198,4 +730,9 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Open http://localhost:${PORT} in your browser`);
+    console.log('');
+    console.log('=== Super Admin Credentials ===');
+    console.log('Email: admin@filetransfer.com');
+    console.log('Password: admin123');
+    console.log('===============================');
 });

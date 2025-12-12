@@ -50,6 +50,19 @@ header h1 {
     color: var(--text-secondary);
 }
 
+/* Auth Buttons on Main Page */
+.auth-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-bottom: 20px;
+}
+
+.auth-buttons .btn {
+    padding: 10px 20px;
+    text-decoration: none;
+}
+
 .tabs {
     display: flex;
     gap: 10px;

@@ -5,13 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>File Transfer - Like WinSCP</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="auth.css">
 </head>
 <body>
     <div class="container">
+        <!-- User Header (populated by JavaScript if logged in) -->
+        <div id="userHeaderContainer"></div>
+
         <header>
             <h1>📁 File Transfer</h1>
             <p class="subtitle">Transfer files between computers - Fast, Simple, Worldwide</p>
         </header>
+
+        <!-- Auth Buttons (shown when not logged in) -->
+        <div id="authButtons" class="auth-buttons" style="display: none;">
+            <a href="/login.html" class="btn btn-primary btn-small">🔐 Login</a>
+            <a href="/signup.html" class="btn btn-secondary btn-small">✨ Sign Up</a>
+        </div>
 
         <!-- Tab Navigation -->
         <div class="tabs">
@@ -91,6 +101,28 @@
         <div id="toast" class="toast"></div>
     </div>
 
+    <script src="auth.js"></script>
     <script src="app.js"></script>
+    <script>
+        // Initialize auth UI
+        (function() {
+            const user = getUser();
+            const userHeaderContainer = document.getElementById('userHeaderContainer');
+            const authButtons = document.getElementById('authButtons');
+            
+            if (user) {
+                // User is logged in - show user header
+                userHeaderContainer.innerHTML = renderUserHeader();
+            } else {
+                // User is not logged in - show auth buttons
+                authButtons.style.display = 'flex';
+            }
+
+            // Handle OAuth callback
+            if (window.location.search.includes('token=')) {
+                handleOAuthCallback();
+            }
+        })();
+    </script>
 </body>
 </html>
