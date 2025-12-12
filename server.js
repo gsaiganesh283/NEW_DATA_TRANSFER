@@ -795,6 +795,7 @@ app.post('/api/upload', optionalAuth, (req, res, next) => {
             }
 
             // Create transfer in database
+            console.log('Creating transfer with files:', files.map(f => f.originalName));
             const transfer = await Transfer.create({
                 code,
                 files,
@@ -805,7 +806,8 @@ app.post('/api/upload', optionalAuth, (req, res, next) => {
                 uploaderEmail: req.user?.email || null
             });
 
-            console.log(`Transfer created: ${code} with ${files.length} files`);
+            console.log(`✅ Transfer saved to DB: ${code} with ${files.length} files`);
+            console.log('Transfer ID:', transfer._id);
 
             res.json({
                 code,
@@ -827,15 +829,18 @@ app.get('/api/files/:code', async (req, res) => {
         const transfer = await Transfer.findOne({ code: req.params.code.toUpperCase() });
 
         if (!transfer) {
+            console.log(`Transfer not found: ${req.params.code.toUpperCase()}`);
             return res.status(404).json({ error: 'Transfer not found or expired' });
         }
+
+        console.log(`Found transfer ${transfer.code} with ${transfer.files.length} files`);
 
         if (transfer.expiresAt < new Date()) {
             await Transfer.deleteOne({ code: transfer.code });
             return res.status(404).json({ error: 'Transfer has expired' });
         }
 
-        res.json({
+        const responseData = {
             files: transfer.files.map(f => ({
                 name: f.originalName,
                 size: f.size,
@@ -847,7 +852,10 @@ app.get('/api/files/:code', async (req, res) => {
             downloadCount: transfer.downloadCount,
             hasPassword: !!transfer.password,
             message: transfer.message
-        });
+        };
+        
+        console.log('Sending files:', responseData.files.length);
+        res.json(responseData);
     } catch (error) {
         console.error('Get files error:', error);
         res.status(500).json({ error: 'Failed to get files' });

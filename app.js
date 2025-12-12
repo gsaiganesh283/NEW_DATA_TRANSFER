@@ -44,7 +44,11 @@ async function loadAppSettings() {
         const response = await fetch('/api/settings');
         if (response.ok) {
             const data = await response.json();
-            appSettings = data.settings;
+            // Settings are returned directly, not nested
+            appSettings = {
+                maxFileSize: data.maxFileSize || 2000,
+                maxFiles: data.maxFiles || 50
+            };
             updateUploadZoneText();
         }
     } catch (error) {
@@ -519,8 +523,10 @@ async function fetchFiles() {
     currentTransferPassword = null;
     
     try {
+        console.log('Fetching files for code:', code);
         const response = await fetch(`/api/files/${code}`);
         const data = await response.json();
+        console.log('Response:', data);
 
         if (!response.ok) {
             showError(data.error || 'Transfer not found');
@@ -530,6 +536,7 @@ async function fetchFiles() {
 
         errorMessage.style.display = 'none';
         currentTransferFiles = data.files;
+        console.log('Files received:', data.files);
         
         // Check if password protected
         if (data.hasPassword) {
@@ -547,6 +554,7 @@ async function fetchFiles() {
         renderAvailableFiles(code, data.files);
         availableFiles.style.display = 'block';
     } catch (error) {
+        console.error('Fetch error:', error);
         showError('Failed to fetch files. Please try again.');
     }
 }
@@ -610,6 +618,8 @@ function hideTransferMessage() {
 }
 
 function renderAvailableFiles(code, files) {
+    console.log('Rendering files:', files);
+    
     // Update file count and total size
     const transferFileCount = document.getElementById('transferFileCount');
     const transferTotalSize = document.getElementById('transferTotalSize');
@@ -620,6 +630,11 @@ function renderAvailableFiles(code, files) {
     if (transferTotalSize) {
         const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
         transferTotalSize.textContent = formatFileSize(totalBytes);
+    }
+    
+    if (!files || files.length === 0) {
+        filesList.innerHTML = '<div class="no-files">No files available</div>';
+        return;
     }
     
     filesList.innerHTML = files.map((file, index) => `
