@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P Data Transfer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 P2P Data Transfer</h1>
+            <p class="subtitle">Transfer files directly between laptops - Fast, Secure, No Third-Party</p>
+        </header>
+
+        <!-- Connection Status -->
+        <div class="status-bar" id="statusBar">
+            <span class="status-indicator" id="statusIndicator"></span>
+            <span id="statusText">Disconnected</span>
+        </div>
+
+        <!-- Main Content -->
+        <div class="content">
+            <!-- Initial Setup -->
+            <div id="setupSection" class="section active">
+                <div class="card">
+                    <h2>Choose an Option</h2>
+                    <div class="button-group">
+                        <button id="createRoomBtn" class="btn btn-primary">
+                            <span class="icon">📤</span>
+                            Create Room (Send Files)
+                        </button>
+                        <button id="joinRoomBtn" class="btn btn-secondary">
+                            <span class="icon">📥</span>
+                            Join Room (Receive Files)
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Room Code Display -->
+            <div id="roomCodeSection" class="section">
+                <div class="card">
+                    <h2>Share This Room Code</h2>
+                    <div class="room-code-display">
+                        <div class="room-code" id="roomCodeDisplay"></div>
+                        <button id="copyCodeBtn" class="btn btn-small">
+                            <span class="icon">📋</span> Copy
+                        </button>
+                    </div>
+                    <p class="info-text">Share this code with the other laptop to establish connection</p>
+                    <div class="waiting-indicator">
+                        <div class="spinner"></div>
+                        <span>Waiting for peer to join...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Join Room Input -->
+            <div id="joinSection" class="section">
+                <div class="card">
+                    <h2>Enter Room Code</h2>
+                    <div class="input-group">
+                        <input 
+                            type="text" 
+                            id="roomCodeInput" 
+                            placeholder="Enter 6-digit code"
+                            maxlength="6"
+                            autocomplete="off"
+                        >
+                        <button id="connectBtn" class="btn btn-primary">Connect</button>
+                    </div>
+                    <button id="backBtn" class="btn btn-text">← Back</button>
+                </div>
+            </div>
+
+            <!-- File Transfer Section -->
+            <div id="transferSection" class="section">
+                <div class="card">
+                    <h2>File Transfer</h2>
+                    <div id="connectionInfo" class="connection-info">
+                        <span class="icon">✓</span>
+                        <span>Connected to peer</span>
+                    </div>
+
+                    <!-- Send Files -->
+                    <div class="transfer-area">
+                        <div class="upload-zone" id="uploadZone">
+                            <input 
+                                type="file" 
+                                id="fileInput" 
+                                multiple 
+                                style="display: none;"
+                            >
+                            <div class="upload-content">
+                                <span class="upload-icon">📁</span>
+                                <h3>Drop files here or click to browse</h3>
+                                <p>You can select multiple files</p>
+                            </div>
+                        </div>
+
+                        <!-- File Queue -->
+                        <div id="fileQueue" class="file-queue"></div>
+
+                        <!-- Active Transfers -->
+                        <div id="activeTransfers" class="active-transfers"></div>
+
+                        <!-- Transfer History -->
+                        <div id="transferHistory" class="transfer-history"></div>
+                    </div>
+
+                    <div class="actions">
+                        <button id="disconnectBtn" class="btn btn-danger">Disconnect</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Error Toast -->
+        <div id="errorToast" class="toast toast-error">
+            <span id="errorMessage"></span>
+        </div>
+
+        <!-- Success Toast -->
+        <div id="successToast" class="toast toast-success">
+            <span id="successMessage"></span>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
