@@ -758,22 +758,54 @@ async function selectDestinationFolder() {
         });
         
         const selectedPathEl = document.getElementById('selectedPath');
+        const fullPathDisplay = document.getElementById('fullPathDisplay');
+        const fullPathEl = document.getElementById('fullPath');
         const destinationHint = document.getElementById('destinationHint');
         
-        if (selectedPathEl) {
-            selectedPathEl.textContent = selectedDestinationHandle.name;
+        // Get folder name
+        const folderName = selectedDestinationHandle.name;
+        
+        // Try to get the full path by resolving from root (if possible)
+        let fullPath = folderName;
+        try {
+            // Attempt to build path - File System Access API doesn't provide full path for security
+            // But we can indicate it's a custom folder
+            fullPath = `📁 ${folderName}`;
+        } catch (e) {
+            // Fallback to just folder name
         }
+        
+        if (selectedPathEl) {
+            selectedPathEl.textContent = folderName;
+            selectedPathEl.title = `Selected folder: ${folderName}`;
+        }
+        
+        // Show full path display
+        if (fullPathDisplay && fullPathEl) {
+            fullPathDisplay.style.display = 'flex';
+            fullPathEl.textContent = `Custom folder selected: ${folderName}`;
+        }
+        
         if (destinationHint) {
-            destinationHint.textContent = '✓ Custom folder selected - click "Save to Folder" to download';
+            destinationHint.innerHTML = '✅ <strong>Folder selected!</strong> Files will be saved to this location';
             destinationHint.style.color = 'var(--success-color)';
         }
         
-        showToast(`Folder selected: ${selectedDestinationHandle.name}`, 'success');
+        // Store the folder name for display purposes
+        selectedDestinationHandle._displayPath = folderName;
+        
+        showToast(`✓ Folder selected: ${folderName}`, 'success');
+        return true;
     } catch (error) {
-        if (error.name !== 'AbortError') {
-            showToast('Failed to select folder', 'error');
+        if (error.name === 'AbortError') {
+            showToast('Folder selection cancelled', 'error');
+        } else if (error.name === 'SecurityError') {
+            showToast('Permission denied. Please try again.', 'error');
+        } else {
+            showToast('Failed to select folder: ' + error.message, 'error');
             console.error('Folder selection error:', error);
         }
+        return false;
     }
 }
 
@@ -781,16 +813,37 @@ async function selectDestinationFolder() {
 async function downloadToSelectedFolder(code, files, selectedIndexes) {
     if (!selectedDestinationHandle) {
         // Prompt to select folder first
-        await selectDestinationFolder();
-        if (!selectedDestinationHandle) {
+        const selected = await selectDestinationFolder();
+        if (!selected || !selectedDestinationHandle) {
+            showToast('Please select a destination folder first', 'error');
             return;
         }
     }
     
-    showToast(`Saving ${selectedIndexes.length} file(s) to ${selectedDestinationHandle.name}...`, 'success');
+    // Verify we still have permission
+    try {
+        const permission = await selectedDestinationHandle.queryPermission({ mode: 'readwrite' });
+        if (permission !== 'granted') {
+            const requestResult = await selectedDestinationHandle.requestPermission({ mode: 'readwrite' });
+            if (requestResult !== 'granted') {
+                showToast('Permission denied for the selected folder', 'error');
+                return;
+            }
+        }
+    } catch (permError) {
+        console.error('Permission check error:', permError);
+        // Try to re-select folder
+        showToast('Please re-select the folder', 'error');
+        selectedDestinationHandle = null;
+        return;
+    }
+    
+    const folderName = selectedDestinationHandle.name || selectedDestinationHandle._displayPath || 'selected folder';
+    showToast(`⏳ Saving ${selectedIndexes.length} file(s) to "${folderName}"...`, 'success');
     
     let successCount = 0;
     let failCount = 0;
+    const failedFiles = [];
     
     for (const idx of selectedIndexes) {
         const file = files[idx];
@@ -800,8 +853,11 @@ async function downloadToSelectedFolder(code, files, selectedIndexes) {
         }
         
         try {
+            // Fetch the file
             const response = await fetch(url);
-            if (!response.ok) throw new Error('Download failed');
+            if (!response.ok) {
+                throw new Error(`HTTP error: ${response.status}`);
+            }
             
             const blob = await response.blob();
             const filename = file.folderPath || file.name;
@@ -813,7 +869,12 @@ async function downloadToSelectedFolder(code, files, selectedIndexes) {
             // Create nested folders if needed
             if (pathParts.length > 1) {
                 for (let i = 0; i < pathParts.length - 1; i++) {
-                    currentDir = await currentDir.getDirectoryHandle(pathParts[i], { create: true });
+                    try {
+                        currentDir = await currentDir.getDirectoryHandle(pathParts[i], { create: true });
+                    } catch (dirError) {
+                        console.error(`Failed to create directory ${pathParts[i]}:`, dirError);
+                        throw new Error(`Cannot create folder: ${pathParts[i]}`);
+                    }
                 }
             }
             
@@ -825,24 +886,62 @@ async function downloadToSelectedFolder(code, files, selectedIndexes) {
             await writable.close();
             
             successCount++;
+            console.log(`✓ Saved: ${filename}`);
         } catch (error) {
             console.error(`Failed to save ${file.name}:`, error);
             failCount++;
+            failedFiles.push(file.name);
+        }
+    }
+    
+    // Update UI with results
+    const fullPathDisplay = document.getElementById('fullPathDisplay');
+    const fullPathEl = document.getElementById('fullPath');
+    
+    if (fullPathDisplay && fullPathEl) {
+        fullPathDisplay.style.display = 'flex';
+        if (failCount === 0) {
+            fullPathEl.textContent = `✅ ${successCount} file(s) saved to: ${folderName}`;
+            fullPathEl.style.color = 'var(--success-color)';
+        } else {
+            fullPathEl.textContent = `⚠️ ${successCount} saved, ${failCount} failed in: ${folderName}`;
+            fullPathEl.style.color = 'var(--warning-color)';
         }
     }
     
     if (failCount === 0) {
-        showToast(`✓ ${successCount} file(s) saved to ${selectedDestinationHandle.name}`, 'success');
+        showToast(`✅ ${successCount} file(s) saved successfully to "${folderName}"`, 'success');
     } else {
-        showToast(`Saved ${successCount} file(s), ${failCount} failed`, 'error');
+        showToast(`⚠️ ${successCount} saved, ${failCount} failed. Check console for details.`, 'error');
+        console.error('Failed files:', failedFiles);
     }
 }
 
 // Download ZIP to selected folder
 async function downloadZipToFolder(code, indexes) {
     if (!selectedDestinationHandle) {
-        await selectDestinationFolder();
-        if (!selectedDestinationHandle) return;
+        const selected = await selectDestinationFolder();
+        if (!selected || !selectedDestinationHandle) {
+            showToast('Please select a destination folder first', 'error');
+            return;
+        }
+    }
+    
+    // Verify permission
+    try {
+        const permission = await selectedDestinationHandle.queryPermission({ mode: 'readwrite' });
+        if (permission !== 'granted') {
+            const requestResult = await selectedDestinationHandle.requestPermission({ mode: 'readwrite' });
+            if (requestResult !== 'granted') {
+                showToast('Permission denied for the selected folder', 'error');
+                return;
+            }
+        }
+    } catch (permError) {
+        console.error('Permission check error:', permError);
+        showToast('Please re-select the folder', 'error');
+        selectedDestinationHandle = null;
+        return;
     }
     
     let url = `/api/download-zip/${code}?indexes=${indexes.join(',')}`;
@@ -850,21 +949,33 @@ async function downloadZipToFolder(code, indexes) {
         url += `&password=${encodeURIComponent(currentTransferPassword)}`;
     }
     
+    const folderName = selectedDestinationHandle.name || selectedDestinationHandle._displayPath || 'selected folder';
+    
     try {
-        showToast('Downloading ZIP...', 'success');
+        showToast('⏳ Downloading ZIP...', 'success');
         const response = await fetch(url);
-        if (!response.ok) throw new Error('Download failed');
+        if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
         
         const blob = await response.blob();
-        const fileHandle = await selectedDestinationHandle.getFileHandle(`transfer-${code}.zip`, { create: true });
+        const zipFilename = `transfer-${code}.zip`;
+        const fileHandle = await selectedDestinationHandle.getFileHandle(zipFilename, { create: true });
         const writable = await fileHandle.createWritable();
         await writable.write(blob);
         await writable.close();
         
-        showToast(`✓ ZIP saved to ${selectedDestinationHandle.name}`, 'success');
+        // Update UI
+        const fullPathDisplay = document.getElementById('fullPathDisplay');
+        const fullPathEl = document.getElementById('fullPath');
+        if (fullPathDisplay && fullPathEl) {
+            fullPathDisplay.style.display = 'flex';
+            fullPathEl.textContent = `✅ ${zipFilename} saved to: ${folderName}`;
+            fullPathEl.style.color = 'var(--success-color)';
+        }
+        
+        showToast(`✅ ZIP saved to "${folderName}/${zipFilename}"`, 'success');
     } catch (error) {
         console.error('ZIP download error:', error);
-        showToast('Failed to save ZIP', 'error');
+        showToast('Failed to save ZIP: ' + error.message, 'error');
     }
 }
 

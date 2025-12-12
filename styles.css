@@ -820,6 +820,28 @@ input[type="text"]:focus {
     margin-top: 8px;
 }
 
+.full-path-display {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+    background: rgba(99, 102, 241, 0.1);
+    border: 1px solid var(--primary-color);
+    border-radius: 8px;
+    margin-top: 10px;
+}
+
+.path-icon {
+    font-size: 1.2rem;
+}
+
+.full-path-text {
+    color: var(--text-primary);
+    font-weight: 500;
+    word-break: break-all;
+    font-size: 0.9rem;
+}
+
 .btn-success {
     background: var(--success-color);
     color: white;
