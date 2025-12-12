@@ -8,44 +8,27 @@ const socket = io({
     transports: ['websocket', 'polling']
 });
 
-// WebRTC configuration with global STUN and TURN servers
+// WebRTC configuration with reliable global STUN and TURN servers
 const rtcConfig = {
     iceServers: [
-        // Global STUN servers
+        // Google Global STUN servers
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun3.l.google.com:19302' },
         { urls: 'stun:stun4.l.google.com:19302' },
         
-        // Metered TURN servers - Global (free tier)
+        // Twilio STUN (Global)
+        { urls: 'stun:global.stun.twilio.com:3478' },
+        
+        // NUMB TURN server (Free, Global)
         {
-            urls: 'turn:a.relay.metered.ca:80',
-            username: 'e8dd65f92ae8d16fcfdb802c',
-            credential: 'uWdWNmkhvyqTmFzS'
-        },
-        {
-            urls: 'turn:a.relay.metered.ca:80?transport=tcp',
-            username: 'e8dd65f92ae8d16fcfdb802c',
-            credential: 'uWdWNmkhvyqTmFzS'
-        },
-        {
-            urls: 'turn:a.relay.metered.ca:443',
-            username: 'e8dd65f92ae8d16fcfdb802c',
-            credential: 'uWdWNmkhvyqTmFzS'
-        },
-        {
-            urls: 'turn:a.relay.metered.ca:443?transport=tcp',
-            username: 'e8dd65f92ae8d16fcfdb802c',
-            credential: 'uWdWNmkhvyqTmFzS'
-        },
-        {
-            urls: 'turns:a.relay.metered.ca:443',
-            username: 'e8dd65f92ae8d16fcfdb802c',
-            credential: 'uWdWNmkhvyqTmFzS'
+            urls: 'turn:numb.viagenie.ca:3478',
+            username: 'webrtc@live.com',
+            credential: 'muazkh'
         },
         
-        // OpenRelay Global TURN
+        // OpenRelay TURN servers (Free, Global)
         {
             urls: 'turn:openrelay.metered.ca:80',
             username: 'openrelayproject',
@@ -53,22 +36,25 @@ const rtcConfig = {
         },
         {
             urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelayproject',
+            username: 'openrelayproject', 
             credential: 'openrelayproject'
         },
         {
             urls: 'turn:openrelay.metered.ca:443?transport=tcp',
             username: 'openrelayproject',
             credential: 'openrelayproject'
-        },
-        
-        // Twilio Global STUN (free)
-        { urls: 'stun:global.stun.twilio.com:3478' }
+        }
     ],
     iceCandidatePoolSize: 10,
     iceTransportPolicy: 'all',
     bundlePolicy: 'max-bundle',
     rtcpMuxPolicy: 'require'
+};
+
+// Relay-only config for when direct connection fails
+const rtcConfigRelayOnly = {
+    ...rtcConfig,
+    iceTransportPolicy: 'relay'
 };
 
 // ICE candidate queue for handling candidates before remote description is set
@@ -250,7 +236,7 @@ function setupSocketListeners() {
             console.log('Received reconnect request, forceRelay:', data.forceRelay);
             pendingIceCandidates = [];
             if (data.forceRelay) {
-                createPeerConnectionWithConfig(getRelayOnlyConfig());
+                createPeerConnectionWithConfig(rtcConfigRelayOnly);
             } else {
                 createPeerConnection();
             }
@@ -366,23 +352,15 @@ function createPeerConnection() {
     }
 }
 
-// Get relay-only config for fallback
-function getRelayOnlyConfig() {
-    return {
-        ...rtcConfig,
-        iceTransportPolicy: 'relay'  // Force TURN relay only
-    };
-}
-
 function retryConnection() {
-    // On second retry, force TURN relay
-    const useRelayOnly = connectionRetries >= 2;
+    // Force TURN relay on first retry (faster fallback for cross-network)
+    const useRelayOnly = connectionRetries >= 1;
     
     if (isHost) {
         pendingIceCandidates = [];
         if (useRelayOnly) {
             console.log('Forcing TURN relay for connection...');
-            createPeerConnectionWithConfig(getRelayOnlyConfig());
+            createPeerConnectionWithConfig(rtcConfigRelayOnly);
         } else {
             createPeerConnection();
         }
