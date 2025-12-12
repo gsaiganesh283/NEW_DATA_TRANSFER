@@ -34,18 +34,89 @@
             <div class="card">
                 <h2>Upload Files to Transfer</h2>
                 
+                <!-- Upload Type Selection -->
+                <div class="upload-type-selector">
+                    <button class="upload-type-btn active" data-type="files" title="Upload Files">
+                        <span class="upload-type-icon">📄</span>
+                        <span>Files</span>
+                    </button>
+                    <button class="upload-type-btn" data-type="folder" title="Upload Folder">
+                        <span class="upload-type-icon">📁</span>
+                        <span>Folder</span>
+                    </button>
+                    <button class="upload-type-btn" data-type="zip" title="Upload & Auto-Compress">
+                        <span class="upload-type-icon">🗜️</span>
+                        <span>Compress</span>
+                    </button>
+                </div>
+
                 <!-- Upload Zone -->
                 <div class="upload-zone" id="uploadZone">
                     <input type="file" id="fileInput" multiple style="display: none;">
+                    <input type="file" id="folderInput" webkitdirectory directory multiple style="display: none;">
                     <div class="upload-content">
-                        <span class="upload-icon">📁</span>
-                        <h3>Drop files here or click to browse</h3>
-                        <p>Maximum 2GB per file, up to 50 files</p>
+                        <span class="upload-icon" id="uploadIcon">📄</span>
+                        <h3 id="uploadTitle">Drop files here or click to browse</h3>
+                        <p id="uploadSubtitle">Maximum 2GB per file, up to 50 files</p>
+                    </div>
+                </div>
+
+                <!-- Advanced Options Toggle -->
+                <div class="advanced-options-toggle">
+                    <button type="button" id="toggleAdvancedBtn" class="btn-link">
+                        ⚙️ Advanced Options <span id="advancedArrow">▼</span>
+                    </button>
+                </div>
+
+                <!-- Advanced Options Panel -->
+                <div id="advancedOptions" class="advanced-options" style="display: none;">
+                    <div class="option-group">
+                        <label class="option-label">
+                            <input type="checkbox" id="compressFiles">
+                            <span>🗜️ Compress files into ZIP before upload</span>
+                        </label>
+                        <small class="option-hint">Reduces upload size and combines all files</small>
+                    </div>
+
+                    <div class="option-group">
+                        <label class="option-label">
+                            <input type="checkbox" id="passwordProtect">
+                            <span>🔒 Password protect transfer</span>
+                        </label>
+                        <div id="passwordField" class="sub-option" style="display: none;">
+                            <input type="password" id="transferPassword" placeholder="Enter password" class="option-input">
+                        </div>
+                    </div>
+
+                    <div class="option-group">
+                        <label class="option-label">
+                            <span>⏰ Expiry Time</span>
+                        </label>
+                        <select id="expirySelect" class="option-select">
+                            <option value="1">1 hour</option>
+                            <option value="6">6 hours</option>
+                            <option value="12">12 hours</option>
+                            <option value="24" selected>24 hours</option>
+                            <option value="72">3 days</option>
+                            <option value="168">7 days</option>
+                        </select>
+                    </div>
+
+                    <div class="option-group">
+                        <label class="option-label">
+                            <span>📝 Add a message (optional)</span>
+                        </label>
+                        <textarea id="transferMessage" class="option-textarea" placeholder="Add a note for the receiver..." maxlength="500"></textarea>
                     </div>
                 </div>
 
                 <!-- Selected Files List -->
                 <div id="selectedFiles" class="file-list"></div>
+
+                <!-- Total Size Display -->
+                <div id="totalSizeDisplay" class="total-size" style="display: none;">
+                    <span id="fileCount">0 files</span> • <span id="totalSize">0 MB</span>
+                </div>
 
                 <!-- Upload Button -->
                 <button id="uploadBtn" class="btn btn-primary" style="display: none;">
@@ -85,11 +156,58 @@
                     <button id="fetchFilesBtn" class="btn btn-primary">Get Files</button>
                 </div>
 
+                <!-- Password Input (shown if transfer is password protected) -->
+                <div id="passwordRequired" class="password-required" style="display: none;">
+                    <div class="input-group">
+                        <input type="password" id="accessPassword" placeholder="Enter password to access files">
+                        <button id="unlockBtn" class="btn btn-primary">🔓 Unlock</button>
+                    </div>
+                </div>
+
+                <!-- Transfer Message -->
+                <div id="transferMessageDisplay" class="transfer-message" style="display: none;">
+                    <div class="message-icon">💬</div>
+                    <p id="messageContent"></p>
+                </div>
+
                 <!-- Available Files -->
                 <div id="availableFiles" class="available-files" style="display: none;">
-                    <h3>📦 Available Files</h3>
+                    <div class="files-header">
+                        <h3>📦 Available Files</h3>
+                        <div class="files-info">
+                            <span id="transferFileCount">0 files</span> • 
+                            <span id="transferTotalSize">0 MB</span>
+                        </div>
+                    </div>
+                    
+                    <!-- File Selection -->
+                    <div class="file-selection-controls">
+                        <label class="select-all-label">
+                            <input type="checkbox" id="selectAllFiles" checked>
+                            <span>Select All</span>
+                        </label>
+                    </div>
+                    
                     <div id="filesList" class="files-list"></div>
-                    <button id="downloadAllBtn" class="btn btn-primary">⬇️ Download All</button>
+                    
+                    <!-- Download Options -->
+                    <div class="download-options">
+                        <button id="downloadSelectedBtn" class="btn btn-primary">
+                            <span>⬇️</span> Download Selected
+                        </button>
+                        <button id="downloadAsZipBtn" class="btn btn-secondary">
+                            <span>🗜️</span> Download as ZIP
+                        </button>
+                    </div>
+
+                    <!-- Preview Panel -->
+                    <div id="previewPanel" class="preview-panel" style="display: none;">
+                        <div class="preview-header">
+                            <h4>Preview</h4>
+                            <button id="closePreview" class="btn-close">✕</button>
+                        </div>
+                        <div id="previewContent" class="preview-content"></div>
+                    </div>
                 </div>
 
                 <!-- Error Message -->

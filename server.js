@@ -7,6 +7,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const archiver = require('archiver');
 
 const app = express();
 const server = http.createServer(app);
@@ -691,29 +692,46 @@ app.post('/api/upload', optionalAuth, (req, res, next) => {
         }
 
         const transferCode = generateTransferCode();
-        const files = req.files.map(file => ({
+        
+        // Get advanced options from request body or query params
+        const password = req.body.password || req.query.password || null;
+        const expiryHours = parseInt(req.body.expiryTime || req.query.expiryTime) || systemSettings.expiryTime;
+        const message = req.body.message || req.query.message || null;
+        const folderPaths = req.body.folderPaths ? JSON.parse(req.body.folderPaths) : null;
+        
+        const files = req.files.map((file, index) => ({
             originalName: file.originalname,
             filename: file.filename,
             path: file.path,
             size: file.size,
-            mimetype: file.mimetype
+            mimetype: file.mimetype,
+            folderPath: folderPaths && folderPaths[index] ? folderPaths[index] : null
         }));
+
+        // Hash password if provided
+        const hashedPassword = password ? bcrypt.hashSync(password, 10) : null;
 
         fileStore.set(transferCode, {
             files: files,
             uploadedAt: Date.now(),
+            expiresAt: Date.now() + (expiryHours * 60 * 60 * 1000),
             downloadCount: 0,
-            uploadedBy: req.user ? req.user.email : null
+            uploadedBy: req.user ? req.user.email : null,
+            password: hashedPassword,
+            message: message,
+            hasPassword: !!password
         });
 
-        console.log(`Files uploaded with code: ${transferCode}, count: ${files.length}`);
+        console.log(`Files uploaded with code: ${transferCode}, count: ${files.length}, password protected: ${!!password}`);
         
         res.json({
             success: true,
             transferCode: transferCode,
             fileCount: files.length,
             totalSize: files.reduce((sum, f) => sum + f.size, 0),
-            expiresIn: `${systemSettings.expiryTime} hour(s)`
+            expiresIn: `${expiryHours} hour(s)`,
+            hasPassword: !!password,
+            hasMessage: !!message
         });
     } catch (error) {
         console.error('Upload error:', error);
@@ -730,26 +748,67 @@ app.get('/api/files/:code', (req, res) => {
         return res.status(404).json({ error: 'Transfer code not found or expired' });
     }
     
+    // Check if transfer has expired
+    if (fileInfo.expiresAt && Date.now() > fileInfo.expiresAt) {
+        fileStore.delete(code);
+        return res.status(404).json({ error: 'Transfer has expired' });
+    }
+    
     res.json({
         success: true,
         files: fileInfo.files.map(f => ({
             name: f.originalName,
             size: f.size,
-            type: f.mimetype
+            type: f.mimetype,
+            folderPath: f.folderPath
         })),
         uploadedAt: fileInfo.uploadedAt,
-        downloadCount: fileInfo.downloadCount
+        expiresAt: fileInfo.expiresAt,
+        downloadCount: fileInfo.downloadCount,
+        hasPassword: fileInfo.hasPassword || false,
+        message: fileInfo.message
     });
+});
+
+// Verify password for protected transfer
+app.post('/api/files/:code/verify', (req, res) => {
+    const code = req.params.code.toUpperCase();
+    const { password } = req.body;
+    const fileInfo = fileStore.get(code);
+    
+    if (!fileInfo) {
+        return res.status(404).json({ error: 'Transfer code not found or expired' });
+    }
+    
+    if (!fileInfo.password) {
+        return res.json({ success: true, verified: true });
+    }
+    
+    const isValid = bcrypt.compareSync(password || '', fileInfo.password);
+    
+    if (!isValid) {
+        return res.status(401).json({ error: 'Incorrect password' });
+    }
+    
+    res.json({ success: true, verified: true });
 });
 
 // Download single file
 app.get('/api/download/:code/:index', (req, res) => {
     const code = req.params.code.toUpperCase();
     const index = parseInt(req.params.index);
+    const password = req.query.password;
     const fileInfo = fileStore.get(code);
     
     if (!fileInfo) {
         return res.status(404).json({ error: 'Transfer code not found or expired' });
+    }
+    
+    // Check password if protected
+    if (fileInfo.password) {
+        if (!password || !bcrypt.compareSync(password, fileInfo.password)) {
+            return res.status(401).json({ error: 'Password required' });
+        }
     }
     
     if (index < 0 || index >= fileInfo.files.length) {
@@ -768,6 +827,59 @@ app.get('/api/download/:code/:index', (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.originalName)}"`);
     res.setHeader('Content-Type', file.mimetype || 'application/octet-stream');
     res.sendFile(file.path);
+});
+
+// Download all files as ZIP
+app.get('/api/download-zip/:code', (req, res) => {
+    const code = req.params.code.toUpperCase();
+    const password = req.query.password;
+    const selectedIndexes = req.query.indexes ? req.query.indexes.split(',').map(Number) : null;
+    const fileInfo = fileStore.get(code);
+    
+    if (!fileInfo) {
+        return res.status(404).json({ error: 'Transfer code not found or expired' });
+    }
+    
+    // Check password if protected
+    if (fileInfo.password) {
+        if (!password || !bcrypt.compareSync(password, fileInfo.password)) {
+            return res.status(401).json({ error: 'Password required' });
+        }
+    }
+    
+    // Determine which files to include
+    const filesToZip = selectedIndexes 
+        ? fileInfo.files.filter((_, idx) => selectedIndexes.includes(idx))
+        : fileInfo.files;
+    
+    if (filesToZip.length === 0) {
+        return res.status(404).json({ error: 'No files to download' });
+    }
+    
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="transfer-${code}.zip"`);
+    
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    
+    archive.on('error', (err) => {
+        console.error('Archive error:', err);
+        res.status(500).json({ error: 'Failed to create ZIP file' });
+    });
+    
+    archive.pipe(res);
+    
+    filesToZip.forEach(file => {
+        if (fs.existsSync(file.path)) {
+            // If file has folder path, preserve folder structure
+            const archivePath = file.folderPath || file.originalName;
+            archive.file(file.path, { name: archivePath });
+        }
+    });
+    
+    archive.finalize();
+    
+    fileInfo.downloadCount++;
+    console.log(`ZIP download: ${filesToZip.length} files from transfer ${code}`);
 });
 
 // Delete transfer (for sender to delete after transfer)

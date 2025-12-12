@@ -393,7 +393,433 @@ input[type="text"]:focus {
     to { opacity: 1; transform: translateY(0); }
 }
 
+/* Upload Type Selector */
+.upload-type-selector {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    justify-content: center;
+}
+
+.upload-type-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding: 15px 25px;
+    border: 2px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-color);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    min-width: 100px;
+}
+
+.upload-type-btn:hover {
+    border-color: var(--primary-color);
+    color: var(--text-primary);
+}
+
+.upload-type-btn.active {
+    border-color: var(--primary-color);
+    background: rgba(99, 102, 241, 0.1);
+    color: var(--primary-color);
+}
+
+.upload-type-icon {
+    font-size: 1.5rem;
+}
+
+.upload-type-btn span:last-child {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+/* Advanced Options */
+.advanced-options-toggle {
+    text-align: center;
+    margin: 15px 0;
+}
+
+.btn-link {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.9rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: color 0.3s ease;
+}
+
+.btn-link:hover {
+    color: var(--primary-color);
+}
+
+#advancedArrow {
+    transition: transform 0.3s ease;
+}
+
+#advancedArrow.open {
+    transform: rotate(180deg);
+}
+
+.advanced-options {
+    background: var(--bg-color);
+    border-radius: 12px;
+    padding: 20px;
+    margin: 15px 0;
+    border: 1px solid var(--border-color);
+    animation: fadeIn 0.3s ease;
+}
+
+.option-group {
+    margin-bottom: 20px;
+}
+
+.option-group:last-child {
+    margin-bottom: 0;
+}
+
+.option-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.option-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--primary-color);
+}
+
+.option-hint {
+    display: block;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    margin-left: 28px;
+    margin-top: 5px;
+}
+
+.sub-option {
+    margin-left: 28px;
+    margin-top: 10px;
+}
+
+.option-input {
+    width: 100%;
+    padding: 10px 15px;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--surface-color);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+}
+
+.option-input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+}
+
+.option-select {
+    width: 100%;
+    padding: 10px 15px;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--surface-color);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    margin-top: 8px;
+    cursor: pointer;
+}
+
+.option-textarea {
+    width: 100%;
+    padding: 12px 15px;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--surface-color);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    margin-top: 8px;
+    min-height: 80px;
+    resize: vertical;
+    font-family: inherit;
+}
+
+.option-textarea:focus,
+.option-select:focus {
+    outline: none;
+    border-color: var(--primary-color);
+}
+
+/* Total Size Display */
+.total-size {
+    text-align: center;
+    padding: 10px;
+    background: var(--bg-color);
+    border-radius: 8px;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin-bottom: 15px;
+}
+
+/* Files Header */
+.files-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.files-info {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+/* File Selection Controls */
+.file-selection-controls {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 10px 15px;
+    background: var(--surface-light);
+    border-radius: 8px;
+    margin-bottom: 15px;
+}
+
+.select-all-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+
+.select-all-label input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--primary-color);
+}
+
+/* Download Options */
+.download-options {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.download-options .btn {
+    flex: 1;
+}
+
+/* Password Required */
+.password-required {
+    margin-top: 20px;
+    padding: 20px;
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid var(--warning-color);
+    border-radius: 12px;
+}
+
+.password-required .input-group input {
+    text-align: left;
+    letter-spacing: normal;
+    text-transform: none;
+}
+
+/* Transfer Message */
+.transfer-message {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 15px;
+    background: rgba(99, 102, 241, 0.1);
+    border: 1px solid var(--primary-color);
+    border-radius: 12px;
+    margin-bottom: 20px;
+}
+
+.message-icon {
+    font-size: 1.5rem;
+}
+
+.transfer-message p {
+    color: var(--text-primary);
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+/* Preview Panel */
+.preview-panel {
+    margin-top: 20px;
+    background: var(--surface-light);
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+}
+
+.preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px;
+    background: var(--bg-color);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.preview-header h4 {
+    color: var(--text-primary);
+}
+
+.btn-close {
+    background: var(--surface-light);
+    border: none;
+    color: var(--text-primary);
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.preview-content {
+    padding: 20px;
+    max-height: 400px;
+    overflow: auto;
+}
+
+.preview-content img {
+    max-width: 100%;
+    border-radius: 8px;
+}
+
+.preview-content pre {
+    background: var(--bg-color);
+    padding: 15px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 0.85rem;
+}
+
+/* File Item with Checkbox */
+.file-item-selectable {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.file-item-selectable input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--primary-color);
+    flex-shrink: 0;
+}
+
+.file-item-content {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* Folder indicator */
+.folder-badge {
+    background: var(--primary-color);
+    color: white;
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-left: 8px;
+}
+
+.file-path {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+/* Preview Button */
+.preview-btn {
+    background: rgba(99, 102, 241, 0.2);
+    color: var(--primary-color);
+    border: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    margin-right: 8px;
+}
+
+.preview-btn:hover {
+    background: rgba(99, 102, 241, 0.3);
+}
+
+/* File Checkbox in Download Items */
+.file-checkbox {
+    display: flex;
+    align-items: center;
+}
+
+.file-checkbox input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--primary-color);
+    cursor: pointer;
+}
+
+.download-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 15px;
+    background: var(--bg-color);
+    border-radius: 10px;
+    margin-bottom: 10px;
+}
+
+.download-item .file-icon {
+    font-size: 1.5rem;
+}
+
+.download-item .file-info {
+    flex: 1;
+}
+
+.download-item .file-name {
+    color: var(--text-primary);
+    font-weight: 500;
+    word-break: break-all;
+}
+
+.download-item .file-size {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
 @media (max-width: 600px) {
+    .upload-type-selector {
+        flex-wrap: wrap;
+    }
+    
+    .upload-type-btn {
+        flex: 1;
+        min-width: 80px;
+        padding: 10px 15px;
+    }
+    
+    .download-options {
+        flex-direction: column;
+    }
+    
     .code {
         font-size: 1.8rem;
         letter-spacing: 4px;
