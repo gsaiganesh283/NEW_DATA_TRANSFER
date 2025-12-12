@@ -8,41 +8,36 @@ const socket = io({
     transports: ['websocket', 'polling']
 });
 
-// WebRTC configuration with reliable global STUN and TURN servers
+// WebRTC configuration with Metered.ca free TURN servers (working globally)
 const rtcConfig = {
     iceServers: [
-        // Google Global STUN servers
+        // Google STUN
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
         
-        // Twilio STUN (Global)
-        { urls: 'stun:global.stun.twilio.com:3478' },
-        
-        // NUMB TURN server (Free, Global)
+        // Metered.ca Free TURN servers (Global - works in India, US, EU, etc.)
         {
-            urls: 'turn:numb.viagenie.ca:3478',
-            username: 'webrtc@live.com',
-            credential: 'muazkh'
-        },
-        
-        // OpenRelay TURN servers (Free, Global)
-        {
-            urls: 'turn:openrelay.metered.ca:80',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
+            urls: 'stun:stun.relay.metered.ca:80'
         },
         {
-            urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelayproject', 
-            credential: 'openrelayproject'
+            urls: 'turn:global.relay.metered.ca:80',
+            username: '83eebabf8b4cce9d5dbcb649',
+            credential: '2D7JvfkOQtBdYW3R'
         },
         {
-            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
+            urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+            username: '83eebabf8b4cce9d5dbcb649',
+            credential: '2D7JvfkOQtBdYW3R'
+        },
+        {
+            urls: 'turn:global.relay.metered.ca:443',
+            username: '83eebabf8b4cce9d5dbcb649',
+            credential: '2D7JvfkOQtBdYW3R'
+        },
+        {
+            urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+            username: '83eebabf8b4cce9d5dbcb649',
+            credential: '2D7JvfkOQtBdYW3R'
         }
     ],
     iceCandidatePoolSize: 10,
@@ -53,8 +48,33 @@ const rtcConfig = {
 
 // Relay-only config for when direct connection fails
 const rtcConfigRelayOnly = {
-    ...rtcConfig,
-    iceTransportPolicy: 'relay'
+    iceServers: [
+        // Only TURN servers for relay
+        {
+            urls: 'turn:global.relay.metered.ca:80',
+            username: '83eebabf8b4cce9d5dbcb649',
+            credential: '2D7JvfkOQtBdYW3R'
+        },
+        {
+            urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+            username: '83eebabf8b4cce9d5dbcb649',
+            credential: '2D7JvfkOQtBdYW3R'
+        },
+        {
+            urls: 'turn:global.relay.metered.ca:443',
+            username: '83eebabf8b4cce9d5dbcb649',
+            credential: '2D7JvfkOQtBdYW3R'
+        },
+        {
+            urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+            username: '83eebabf8b4cce9d5dbcb649',
+            credential: '2D7JvfkOQtBdYW3R'
+        }
+    ],
+    iceCandidatePoolSize: 10,
+    iceTransportPolicy: 'relay',
+    bundlePolicy: 'max-bundle',
+    rtcpMuxPolicy: 'require'
 };
 
 // ICE candidate queue for handling candidates before remote description is set
@@ -258,6 +278,8 @@ function createPeerConnection() {
     }
     
     peerConnection = new RTCPeerConnection(rtcConfig);
+    
+    console.log('Created peer connection with config:', JSON.stringify(rtcConfig.iceServers.map(s => s.urls)));
 
     // Set connection timeout (30 seconds)
     connectionTimeout = setTimeout(() => {
@@ -277,16 +299,24 @@ function createPeerConnection() {
     // ICE gathering state
     peerConnection.onicegatheringstatechange = () => {
         console.log('ICE gathering state:', peerConnection.iceGatheringState);
+        if (peerConnection.iceGatheringState === 'complete') {
+            console.log('ICE gathering complete');
+        }
     };
 
     // ICE candidate handling
     peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
-            console.log('ICE candidate type:', event.candidate.type);
+            const candidateType = event.candidate.candidate.includes('relay') ? 'RELAY (TURN)' : 
+                                  event.candidate.candidate.includes('srflx') ? 'SERVER REFLEXIVE' : 
+                                  event.candidate.candidate.includes('host') ? 'HOST' : 'UNKNOWN';
+            console.log('ICE candidate:', candidateType, event.candidate.candidate.substring(0, 50));
             socket.emit('ice-candidate', {
                 candidate: event.candidate,
                 roomCode
             });
+        } else {
+            console.log('ICE candidate gathering finished');
         }
     };
 
