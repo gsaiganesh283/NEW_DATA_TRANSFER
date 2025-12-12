@@ -44,11 +44,7 @@ async function loadAppSettings() {
         const response = await fetch('/api/settings');
         if (response.ok) {
             const data = await response.json();
-            // Settings are returned directly, not nested
-            appSettings = {
-                maxFileSize: data.maxFileSize || 2000,
-                maxFiles: data.maxFiles || 50
-            };
+            appSettings = data.settings;
             updateUploadZoneText();
         }
     } catch (error) {
@@ -395,34 +391,52 @@ async function uploadFiles() {
         };
 
         xhr.onload = () => {
+            console.log('XHR status:', xhr.status);
+            console.log('XHR response:', xhr.responseText);
+            
             if (xhr.status === 200) {
-                const response = JSON.parse(xhr.responseText);
-                currentTransferCode = response.transferCode;
-                generatedCode.textContent = response.transferCode;
-                
-                // Update expiry info text
-                const infoText = document.querySelector('.info-text');
-                if (infoText) {
-                    infoText.textContent = `⏰ Code expires in ${response.expiresIn}`;
-                    if (response.hasPassword) {
-                        infoText.textContent += ' | 🔒 Password protected';
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    console.log('Upload response parsed:', response);
+                    
+                    if (!response.transferCode) {
+                        console.error('No transferCode in response!');
+                        showToast('Upload error: No code received', 'error');
+                        resetUploadUI();
+                        return;
                     }
+                    
+                    currentTransferCode = response.transferCode;
+                    generatedCode.textContent = response.transferCode;
+                    
+                    // Update expiry info text
+                    const infoText = document.querySelector('.info-text');
+                    if (infoText) {
+                        infoText.textContent = `⏰ Code expires in ${response.expiresIn || 'unknown'}`;
+                        if (response.hasPassword) {
+                            infoText.textContent += ' | 🔒 Password protected';
+                        }
+                    }
+                    
+                    uploadProgress.style.display = 'none';
+                    uploadZone.style.display = 'none';
+                    selectedFilesDiv.innerHTML = '';
+                    transferCodeDisplay.style.display = 'block';
+                    
+                    // Hide advanced options
+                    if (advancedOptions) advancedOptions.style.display = 'none';
+                    document.querySelector('.advanced-options-toggle').style.display = 'none';
+                    document.querySelector('.upload-type-selector').style.display = 'none';
+                    
+                    const totalSizeDisplay = document.getElementById('totalSizeDisplay');
+                    if (totalSizeDisplay) totalSizeDisplay.style.display = 'none';
+                    
+                    showToast('Files uploaded successfully!', 'success');
+                } catch (parseError) {
+                    console.error('JSON parse error:', parseError);
+                    showToast('Upload error: Invalid response', 'error');
+                    resetUploadUI();
                 }
-                
-                uploadProgress.style.display = 'none';
-                uploadZone.style.display = 'none';
-                selectedFilesDiv.innerHTML = '';
-                transferCodeDisplay.style.display = 'block';
-                
-                // Hide advanced options
-                if (advancedOptions) advancedOptions.style.display = 'none';
-                document.querySelector('.advanced-options-toggle').style.display = 'none';
-                document.querySelector('.upload-type-selector').style.display = 'none';
-                
-                const totalSizeDisplay = document.getElementById('totalSizeDisplay');
-                if (totalSizeDisplay) totalSizeDisplay.style.display = 'none';
-                
-                showToast('Files uploaded successfully!', 'success');
             } else {
                 const error = JSON.parse(xhr.responseText);
                 throw new Error(error.error || 'Upload failed');
