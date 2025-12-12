@@ -1,43 +1,54 @@
-# 🚀 P2P Data Transfer Application
+# 🚀 Secure File Transfer Application
 
-An advanced peer-to-peer data transfer application that allows you to transfer files directly between two laptops online without any third-party storage services. Built with WebRTC for secure, fast, and direct file transfers.
+A secure file transfer application with user authentication, admin dashboard, and MongoDB database for persistent storage.
 
 ## ✨ Features
 
-- **Direct P2P Transfer**: Files transfer directly between devices using WebRTC
-- **No File Size Limits**: Transfer files of any size
-- **Multiple File Support**: Send multiple files simultaneously
-- **Real-time Progress**: Track transfer progress with speed indicators
-- **Secure Connection**: End-to-end encrypted transfers
-- **No Third-Party Storage**: Files never touch external servers
-- **Modern UI**: Beautiful, responsive interface with drag-and-drop support
-- **Transfer History**: Keep track of all transferred files
-- **Room-based Connection**: Simple 6-digit room codes for pairing devices
+- **Secure File Upload**: Upload files and get a unique transfer code
+- **User Authentication**: Login/Signup with email or Google OAuth
+- **Admin Dashboard**: Manage users, transfers, and system settings
+- **MongoDB Database**: Persistent storage for all data
+- **Password Protection**: Optionally protect transfers with passwords
+- **ZIP Downloads**: Download multiple files as a ZIP archive
+- **Custom Expiry**: Set custom expiry time (1-168 hours)
+- **Folder Upload**: Upload entire folders with structure preserved
+- **Real-time Stats**: Track downloads, storage usage, and more
 
-## 🏗️ Architecture
+## 🗄️ Database Setup (MongoDB Atlas - FREE)
 
-### Backend (Node.js + Express + Socket.io)
-- **Signaling Server**: Facilitates WebRTC connection establishment
-- **Room Management**: Creates and manages transfer rooms
-- **Peer Discovery**: Connects two devices using room codes
+### Step 1: Create MongoDB Atlas Account
+1. Go to [MongoDB Atlas](https://www.mongodb.com/cloud/atlas)
+2. Sign up for a free account
+3. Create a new cluster (Free M0 tier)
 
-### Frontend (HTML + CSS + JavaScript)
-- **WebRTC Data Channels**: Handles P2P file transfer
-- **Socket.io Client**: Manages signaling and room coordination
-- **Drag & Drop UI**: Modern interface for file selection
-- **Progress Tracking**: Real-time transfer monitoring
+### Step 2: Configure Database Access
+1. Go to **Database Access** → **Add New Database User**
+2. Create a username and password (save these!)
+3. Set privileges to "Read and Write to any database"
 
-### Technology Stack
-- **WebRTC**: Peer-to-peer data channel for file transfer
-- **Socket.io**: Real-time bidirectional signaling
-- **Express.js**: Web server and API
-- **STUN Servers**: NAT traversal for connection establishment
+### Step 3: Configure Network Access
+1. Go to **Network Access** → **Add IP Address**
+2. Click **"Allow Access from Anywhere"** (0.0.0.0/0)
+3. Click **Confirm**
+
+### Step 4: Get Connection String
+1. Go to **Database** → **Connect** → **Connect your application**
+2. Copy the connection string, it looks like:
+   ```
+   mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
+   ```
+3. Replace `<username>` and `<password>` with your credentials
+4. Add database name: `mongodb+srv://user:pass@cluster0.xxxxx.mongodb.net/filetransfer?retryWrites=true&w=majority`
+
+### Step 5: Set Environment Variable
+Set `MONGODB_URI` environment variable with your connection string.
 
 ## 🚀 Getting Started
 
 ### Prerequisites
-- Node.js (v14 or higher)
-- npm or yarn
+- Node.js (v18 or higher)
+- npm
+- MongoDB Atlas account (free)
 
 ### Installation
 
@@ -51,7 +62,16 @@ An advanced peer-to-peer data transfer application that allows you to transfer f
    npm install
    ```
 
-3. **Start the server**:
+3. **Set environment variables**:
+   ```bash
+   # Windows PowerShell
+   $env:MONGODB_URI="mongodb+srv://user:pass@cluster0.xxxxx.mongodb.net/filetransfer?retryWrites=true&w=majority"
+   
+   # Linux/Mac
+   export MONGODB_URI="mongodb+srv://user:pass@cluster0.xxxxx.mongodb.net/filetransfer?retryWrites=true&w=majority"
+   ```
+
+4. **Start the server**:
    ```bash
    npm start
    ```
@@ -149,42 +169,62 @@ const rtcConfig = {
 
 ```
 NEW_DATA_TRANSFER/
-├── server.js           # Node.js/Express server with Socket.io
+├── server.js           # Main Express server with MongoDB
 ├── package.json        # Project dependencies
-├── .gitignore         # Git ignore rules
-└── public/            # Frontend files
-    ├── index.html     # Main HTML structure
-    ├── styles.css     # UI styling and animations
-    └── app.js         # WebRTC and file transfer logic
+├── config/
+│   └── database.js     # MongoDB connection config
+├── models/
+│   ├── User.js         # User model schema
+│   ├── Transfer.js     # Transfer model schema
+│   └── Settings.js     # Settings model schema
+├── index.html          # Main upload/download page
+├── login.html          # Login page
+├── signup.html         # Signup page
+├── admin.html          # Admin dashboard
+├── app.js              # Frontend JavaScript
+├── auth.js             # Auth frontend JavaScript
+├── admin.js            # Admin frontend JavaScript
+├── styles.css          # Main styles
+├── auth.css            # Auth page styles
+├── Dockerfile          # Docker configuration
+└── render.yaml         # Render deployment config
 ```
 
-## 🔧 Development
+## 🚀 Deployment on Render (FREE)
 
-### Run in Development Mode
+### Step 1: Push to GitHub
 ```bash
-npm run dev
+git add .
+git commit -m "Add MongoDB support"
+git push origin main
 ```
 
-This uses nodemon to automatically restart the server on file changes.
+### Step 2: Create Render Service
+1. Go to [Render.com](https://render.com)
+2. Connect your GitHub repository
+3. Select "Web Service"
+4. Use the following settings:
+   - **Build Command**: `npm install`
+   - **Start Command**: `npm start`
 
-### Testing Locally
-1. Start the server
-2. Open `http://localhost:3000` in two different browser windows
-3. Create a room in one window
-4. Join with the room code in the other window
-5. Test file transfers between windows
+### Step 3: Add Environment Variables on Render
+1. Go to your service → **Environment**
+2. Add the following variables:
+   - `MONGODB_URI` = Your MongoDB Atlas connection string
+   - `JWT_SECRET` = (auto-generated or custom)
+   - `GOOGLE_CLIENT_ID` = (optional, for Google OAuth)
+   - `GOOGLE_CLIENT_SECRET` = (optional, for Google OAuth)
 
-## 🚀 Deployment
+### Step 4: Deploy
+Click "Deploy" and wait for the build to complete.
 
-### Deploy to Cloud (Heroku, Railway, etc.)
-1. Ensure `PORT` is read from environment variable
-2. Add start script to package.json (already included)
-3. Deploy using platform-specific instructions
+## 🔐 Super Admin Credentials
 
-### Deploy on Local Network
-1. Start the server
-2. Find your local IP address
-3. Other devices can access via `http://YOUR_IP:3000`
+After first deployment, login with:
+- **Email**: admin@filetransfer.com
+- **Password**: admin123
+
+⚠️ **Change this password immediately after first login!**
 
 ## 📝 License
 

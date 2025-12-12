@@ -8,6 +8,12 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const archiver = require('archiver');
+const mongoose = require('mongoose');
+
+// Import Models
+const User = require('./models/User');
+const Transfer = require('./models/Transfer');
+const Settings = require('./models/Settings');
 
 const app = express();
 const server = http.createServer(app);
@@ -15,6 +21,9 @@ const server = http.createServer(app);
 // JWT Secret (in production, use environment variable)
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production';
 const JWT_EXPIRES_IN = '7d';
+
+// MongoDB Connection (password @ is encoded as %40)
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://filetransfer:Ganesh05%40GG@cluster0.seiftfg.mongodb.net/filetransfer?retryWrites=true&w=majority';
 
 // Google OAuth Configuration (set these in environment variables)
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
@@ -31,92 +40,103 @@ if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
 }
 
-// Simple file-based database for users
-const usersFile = path.join(dataDir, 'users.json');
+// Database connection status
+let dbConnected = false;
 
-function loadUsers() {
+// Connect to MongoDB
+async function connectDB() {
     try {
-        if (fs.existsSync(usersFile)) {
-            return JSON.parse(fs.readFileSync(usersFile, 'utf8'));
-        }
+        await mongoose.connect(MONGODB_URI);
+        dbConnected = true;
+        console.log('✅ MongoDB Connected Successfully');
+        
+        // Initialize SuperAdmin after DB connection
+        await initializeSuperAdmin();
+        
+        // Initialize default settings
+        await initializeSettings();
+        
+        return true;
     } catch (error) {
-        console.error('Error loading users:', error);
+        console.error('❌ MongoDB Connection Error:', error.message);
+        console.log('⚠️  Running without database - data will not persist!');
+        dbConnected = false;
+        return false;
     }
-    return [];
-}
-
-function saveUsers(users) {
-    fs.writeFileSync(usersFile, JSON.stringify(users, null, 2));
 }
 
 // Initialize with superadmin if not exists
-function initializeSuperAdmin() {
-    let users = loadUsers();
-    const superadmin = users.find(u => u.role === 'superadmin');
-    
-    if (!superadmin) {
-        const hashedPassword = bcrypt.hashSync('admin123', 10);
-        users.push({
-            id: crypto.randomUUID(),
-            name: 'Super Admin',
-            email: 'admin@filetransfer.com',
-            password: hashedPassword,
-            role: 'superadmin',
-            provider: 'local',
-            createdAt: new Date().toISOString()
-        });
-        saveUsers(users);
-        console.log('Super Admin created with email: admin@filetransfer.com and password: admin123');
-    }
-}
-
-initializeSuperAdmin();
-
-// Store file metadata
-const fileStore = new Map();
-
-// Settings file for persistence
-const settingsFile = path.join(dataDir, 'settings.json');
-
-// Load settings from file or use defaults
-function loadSettings() {
+async function initializeSuperAdmin() {
     try {
-        if (fs.existsSync(settingsFile)) {
-            return JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+        const superadmin = await User.findOne({ role: 'superadmin' });
+        
+        if (!superadmin) {
+            const hashedPassword = await bcrypt.hash('admin123', 10);
+            await User.create({
+                name: 'Super Admin',
+                email: 'admin@filetransfer.com',
+                password: hashedPassword,
+                role: 'superadmin',
+                provider: 'local'
+            });
+            console.log('✅ Super Admin created with email: admin@filetransfer.com and password: admin123');
         }
     } catch (error) {
-        console.error('Error loading settings:', error);
+        console.error('Error initializing superadmin:', error);
     }
-    return {
-        maxFileSize: 2000, // MB (2GB)
-        maxFiles: 50,
-        expiryTime: 24, // hours
-        allowAnonymous: true,
-        storagePath: 'uploads', // relative to app directory or absolute path
-        enableCloudStorage: false,
-        cloudProvider: 'local', // local, s3, gcs, azure
-        cloudBucket: '',
-        cloudRegion: ''
-    };
 }
 
-function saveSettings(settings) {
-    fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
+// Initialize default settings
+async function initializeSettings() {
+    try {
+        let settings = await Settings.findOne({ key: 'global' });
+        if (!settings) {
+            settings = await Settings.create({ key: 'global' });
+            console.log('✅ Default settings initialized');
+        }
+        return settings;
+    } catch (error) {
+        console.error('Error initializing settings:', error);
+        return null;
+    }
 }
 
-// System settings
-let systemSettings = loadSettings();
+// Get system settings
+async function getSettings() {
+    try {
+        if (!dbConnected) {
+            return {
+                maxFileSize: 2000,
+                maxFilesPerTransfer: 50,
+                defaultExpiryHours: 24,
+                storagePath: 'uploads'
+            };
+        }
+        let settings = await Settings.findOne({ key: 'global' });
+        if (!settings) {
+            settings = await Settings.create({ key: 'global' });
+        }
+        return settings;
+    } catch (error) {
+        console.error('Error getting settings:', error);
+        return {
+            maxFileSize: 2000,
+            maxFilesPerTransfer: 50,
+            defaultExpiryHours: 24,
+            storagePath: 'uploads'
+        };
+    }
+}
 
 // Get current upload directory based on settings
-function getUploadDir() {
-    let uploadPath = systemSettings.storagePath || 'uploads';
+async function getUploadDir() {
+    const settings = await getSettings();
+    let uploadPath = settings.storagePath || 'uploads';
     
-    // If relative path, make it relative to app directory
     if (!path.isAbsolute(uploadPath)) {
         uploadPath = path.join(__dirname, uploadPath);
     }
     
-    // Ensure directory exists
     if (!fs.existsSync(uploadPath)) {
         fs.mkdirSync(uploadPath, { recursive: true });
     }
@@ -124,16 +144,17 @@ function getUploadDir() {
     return uploadPath;
 }
 
-// Configure multer for file uploads with dynamic settings
+// Configure multer for file uploads
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, getUploadDir());
+    destination: async (req, file, cb) => {
+        const uploadDir = await getUploadDir();
+        cb(null, uploadDir);
     },
-    filename: (req, file, cb) => {
-        // Create date-based subdirectory for organization
+    filename: async (req, file, cb) => {
+        const uploadDir = await getUploadDir();
         const date = new Date();
         const dateDir = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-        const fullDir = path.join(getUploadDir(), dateDir);
+        const fullDir = path.join(uploadDir, dateDir);
         
         if (!fs.existsSync(fullDir)) {
             fs.mkdirSync(fullDir, { recursive: true });
@@ -144,15 +165,10 @@ const storage = multer.diskStorage({
     }
 });
 
-// Create upload middleware with current settings
-function createUploadMiddleware() {
-    return multer({ 
-        storage: storage,
-        limits: { fileSize: (systemSettings.maxFileSize || 2000) * 1024 * 1024 }
-    });
-}
-
-let upload = createUploadMiddleware();
+const upload = multer({ 
+    storage: storage,
+    limits: { fileSize: 2147483648 } // 2GB default
+});
 
 // Middleware
 app.use(cors({
@@ -171,7 +187,7 @@ function generateTransferCode() {
 // Generate JWT token
 function generateToken(user) {
     return jwt.sign(
-        { id: user.id, email: user.email, role: user.role },
+        { id: user._id || user.id, email: user.email, role: user.role },
         JWT_SECRET,
         { expiresIn: JWT_EXPIRES_IN }
     );
@@ -211,7 +227,7 @@ function requireSuperAdmin(req, res, next) {
     next();
 }
 
-// Optional Auth Middleware (for uploads that can be anonymous)
+// Optional Auth Middleware
 function optionalAuth(req, res, next) {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -227,20 +243,25 @@ function optionalAuth(req, res, next) {
 }
 
 // Clean up expired files
-function cleanupExpiredFiles() {
-    const now = Date.now();
-    const expiryMs = systemSettings.expiryTime * 60 * 60 * 1000;
+async function cleanupExpiredFiles() {
+    if (!dbConnected) return;
     
-    for (const [code, fileInfo] of fileStore.entries()) {
-        if (now - fileInfo.uploadedAt > expiryMs) {
-            fileInfo.files.forEach(file => {
+    try {
+        const expiredTransfers = await Transfer.find({ expiresAt: { $lt: new Date() } });
+        
+        for (const transfer of expiredTransfers) {
+            // Delete physical files
+            for (const file of transfer.files) {
                 if (fs.existsSync(file.path)) {
                     fs.unlinkSync(file.path);
                 }
-            });
-            fileStore.delete(code);
-            console.log(`Cleaned up expired transfer: ${code}`);
+            }
+            // Delete from database
+            await Transfer.deleteOne({ _id: transfer._id });
+            console.log(`Cleaned up expired transfer: ${transfer.code}`);
         }
+    } catch (error) {
+        console.error('Cleanup error:', error);
     }
 }
 
@@ -261,28 +282,22 @@ app.post('/auth/signup', async (req, res) => {
             return res.status(400).json({ error: 'Password must be at least 6 characters' });
         }
 
-        let users = loadUsers();
-        
-        if (users.find(u => u.email.toLowerCase() === email.toLowerCase())) {
+        const existingUser = await User.findOne({ email: email.toLowerCase() });
+        if (existingUser) {
             return res.status(400).json({ error: 'Email already registered' });
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
-        const newUser = {
-            id: crypto.randomUUID(),
+        const newUser = await User.create({
             name: name || email.split('@')[0],
             email: email.toLowerCase(),
             password: hashedPassword,
             role: 'user',
-            provider: 'local',
-            createdAt: new Date().toISOString()
-        };
-
-        users.push(newUser);
-        saveUsers(users);
+            provider: 'local'
+        });
 
         const token = generateToken(newUser);
-        const userResponse = { ...newUser };
+        const userResponse = newUser.toObject();
         delete userResponse.password;
 
         res.json({ token, user: userResponse });
@@ -301,24 +316,27 @@ app.post('/auth/login', async (req, res) => {
             return res.status(400).json({ error: 'Email and password are required' });
         }
 
-        const users = loadUsers();
-        const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+        const user = await User.findOne({ email: email.toLowerCase() });
 
         if (!user) {
             return res.status(401).json({ error: 'Invalid email or password' });
         }
 
-        if (user.provider === 'google') {
-            return res.status(401).json({ error: 'Please login with Google' });
+        if (user.provider !== 'local') {
+            return res.status(401).json({ error: `Please login with ${user.provider}` });
         }
 
-        const validPassword = await bcrypt.compare(password, user.password);
-        if (!validPassword) {
+        const isValidPassword = await bcrypt.compare(password, user.password);
+        if (!isValidPassword) {
             return res.status(401).json({ error: 'Invalid email or password' });
         }
 
+        // Update last login
+        user.lastLogin = new Date();
+        await user.save();
+
         const token = generateToken(user);
-        const userResponse = { ...user };
+        const userResponse = user.toObject();
         delete userResponse.password;
 
         res.json({ token, user: userResponse });
@@ -328,45 +346,36 @@ app.post('/auth/login', async (req, res) => {
     }
 });
 
-// Verify token
-app.get('/auth/verify', authenticateToken, (req, res) => {
-    const users = loadUsers();
-    const user = users.find(u => u.id === req.user.id);
-    
-    if (!user) {
-        return res.status(401).json({ error: 'User not found' });
+// Verify Token
+app.get('/auth/verify', authenticateToken, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id).select('-password');
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json({ valid: true, user });
+    } catch (error) {
+        res.status(500).json({ error: 'Verification failed' });
     }
-
-    const userResponse = { ...user };
-    delete userResponse.password;
-    
-    res.json({ valid: true, user: userResponse });
 });
 
-// Logout (client-side handles this, but we can log it)
+// Logout
 app.post('/auth/logout', authenticateToken, (req, res) => {
-    res.json({ success: true });
+    res.json({ message: 'Logged out successfully' });
 });
 
-// ==================== GOOGLE OAUTH ROUTES ====================
-
-// Google OAuth - Redirect to Google
+// Google OAuth - Initiate
 app.get('/auth/google', (req, res) => {
     if (!GOOGLE_CLIENT_ID) {
-        return res.status(500).send(`
-            <html>
-            <body style="font-family: sans-serif; text-align: center; padding: 50px;">
-                <h2>Google OAuth Not Configured</h2>
-                <p>Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables.</p>
-                <a href="/login.html">Back to Login</a>
-            </body>
-            </html>
-        `);
+        return res.status(500).json({ error: 'Google OAuth not configured' });
     }
-
-    const scope = encodeURIComponent('email profile');
-    const redirectUri = encodeURIComponent(GOOGLE_CALLBACK_URL);
-    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&access_type=offline`;
+    
+    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+        `client_id=${GOOGLE_CLIENT_ID}` +
+        `&redirect_uri=${encodeURIComponent(GOOGLE_CALLBACK_URL)}` +
+        `&response_type=code` +
+        `&scope=email%20profile` +
+        `&access_type=offline`;
     
     res.redirect(googleAuthUrl);
 });
@@ -375,9 +384,9 @@ app.get('/auth/google', (req, res) => {
 app.get('/auth/google/callback', async (req, res) => {
     try {
         const { code } = req.query;
-
+        
         if (!code) {
-            return res.redirect('/login.html?error=oauth_failed');
+            return res.redirect('/login.html?error=Google login failed');
         }
 
         // Exchange code for tokens
@@ -394,10 +403,9 @@ app.get('/auth/google/callback', async (req, res) => {
         });
 
         const tokens = await tokenResponse.json();
-
+        
         if (!tokens.access_token) {
-            console.error('Token exchange failed:', tokens);
-            return res.redirect('/login.html?error=oauth_failed');
+            return res.redirect('/login.html?error=Failed to get access token');
         }
 
         // Get user info
@@ -407,261 +415,242 @@ app.get('/auth/google/callback', async (req, res) => {
 
         const googleUser = await userInfoResponse.json();
 
-        if (!googleUser.email) {
-            return res.redirect('/login.html?error=oauth_failed');
-        }
-
-        let users = loadUsers();
-        let user = users.find(u => u.email.toLowerCase() === googleUser.email.toLowerCase());
+        // Find or create user
+        let user = await User.findOne({ email: googleUser.email.toLowerCase() });
 
         if (!user) {
-            // Create new user
-            user = {
-                id: crypto.randomUUID(),
-                name: googleUser.name || googleUser.email.split('@')[0],
+            user = await User.create({
+                name: googleUser.name,
                 email: googleUser.email.toLowerCase(),
-                avatar: googleUser.picture,
                 role: 'user',
                 provider: 'google',
-                googleId: googleUser.id,
-                createdAt: new Date().toISOString()
-            };
-            users.push(user);
-            saveUsers(users);
+                googleId: googleUser.id
+            });
         } else if (user.provider !== 'google') {
-            // Link Google to existing account
-            user.googleId = googleUser.id;
-            user.avatar = googleUser.picture;
             user.provider = 'google';
-            saveUsers(users);
+            user.googleId = googleUser.id;
+            await user.save();
         }
 
-        const token = generateToken(user);
-        const userResponse = { ...user };
-        delete userResponse.password;
+        user.lastLogin = new Date();
+        await user.save();
 
-        // Redirect with token
-        const userStr = encodeURIComponent(JSON.stringify(userResponse));
-        res.redirect(`/index.html?token=${token}&user=${userStr}`);
+        const token = generateToken(user);
+        res.redirect(`/?token=${token}`);
     } catch (error) {
         console.error('Google OAuth error:', error);
-        res.redirect('/login.html?error=oauth_failed');
+        res.redirect('/login.html?error=Google login failed');
     }
 });
 
-// ==================== ADMIN API ROUTES ====================
+// ==================== ADMIN ROUTES ====================
 
 // Get admin stats
-app.get('/api/admin/stats', authenticateToken, requireAdmin, (req, res) => {
-    const users = loadUsers();
-    
-    let totalSize = 0;
-    let totalDownloads = 0;
-    
-    for (const [code, info] of fileStore.entries()) {
-        info.files.forEach(f => totalSize += f.size);
-        totalDownloads += info.downloadCount;
-    }
+app.get('/api/admin/stats', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const totalUsers = await User.countDocuments();
+        const activeTransfers = await Transfer.countDocuments({ expiresAt: { $gt: new Date() } });
+        
+        const transfers = await Transfer.find();
+        const totalDownloads = transfers.reduce((sum, t) => sum + (t.downloadCount || 0), 0);
+        const totalStorage = transfers.reduce((sum, t) => sum + (t.totalSize || 0), 0);
 
-    res.json({
-        totalUsers: users.length,
-        activeTransfers: fileStore.size,
-        totalDownloads,
-        storageUsed: totalSize
-    });
+        res.json({
+            totalUsers,
+            activeTransfers,
+            totalDownloads,
+            storageUsed: totalStorage
+        });
+    } catch (error) {
+        console.error('Stats error:', error);
+        res.status(500).json({ error: 'Failed to get stats' });
+    }
 });
 
 // Get all users
-app.get('/api/admin/users', authenticateToken, requireAdmin, (req, res) => {
-    const users = loadUsers().map(u => {
-        const user = { ...u };
-        delete user.password;
-        return user;
-    });
-    res.json({ users });
+app.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const users = await User.find().select('-password').sort({ createdAt: -1 });
+        res.json({ users: users.map(u => ({ ...u.toObject(), id: u._id })) });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to get users' });
+    }
 });
 
 // Get single user
-app.get('/api/admin/users/:id', authenticateToken, requireAdmin, (req, res) => {
-    const users = loadUsers();
-    const user = users.find(u => u.id === req.params.id);
-    
-    if (!user) {
-        return res.status(404).json({ error: 'User not found' });
+app.get('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id).select('-password');
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json({ user: { ...user.toObject(), id: user._id } });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to get user' });
     }
-
-    const userResponse = { ...user };
-    delete userResponse.password;
-    res.json(userResponse);
 });
 
 // Update user
-app.put('/api/admin/users/:id', authenticateToken, requireAdmin, (req, res) => {
-    let users = loadUsers();
-    const userIndex = users.findIndex(u => u.id === req.params.id);
-    
-    if (userIndex === -1) {
-        return res.status(404).json({ error: 'User not found' });
-    }
+app.put('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { name, email, role } = req.body;
+        const user = await User.findById(req.params.id);
+        
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
 
-    const targetUser = users[userIndex];
-    
-    // Prevent demoting superadmin unless you're superadmin
-    if (targetUser.role === 'superadmin' && req.user.role !== 'superadmin') {
-        return res.status(403).json({ error: 'Cannot modify super admin' });
-    }
+        // Prevent modifying superadmin unless you are superadmin
+        if (user.role === 'superadmin' && req.user.role !== 'superadmin') {
+            return res.status(403).json({ error: 'Cannot modify superadmin' });
+        }
 
-    // Prevent promoting to superadmin unless you're superadmin
-    if (req.body.role === 'superadmin' && req.user.role !== 'superadmin') {
-        return res.status(403).json({ error: 'Cannot assign super admin role' });
-    }
+        if (name) user.name = name;
+        if (email) user.email = email.toLowerCase();
+        if (role && req.user.role === 'superadmin') user.role = role;
+        
+        await user.save();
 
-    const { name, email, role } = req.body;
-    
-    if (name) users[userIndex].name = name;
-    if (email) users[userIndex].email = email.toLowerCase();
-    if (role && (req.user.role === 'superadmin' || role !== 'superadmin')) {
-        users[userIndex].role = role;
+        const userResponse = user.toObject();
+        delete userResponse.password;
+        res.json({ user: { ...userResponse, id: user._id } });
+    } catch (error) {
+        console.error('Update user error:', error);
+        res.status(500).json({ error: 'Failed to update user' });
     }
-
-    saveUsers(users);
-    
-    const userResponse = { ...users[userIndex] };
-    delete userResponse.password;
-    res.json(userResponse);
 });
 
 // Delete user
-app.delete('/api/admin/users/:id', authenticateToken, requireAdmin, (req, res) => {
-    let users = loadUsers();
-    const userIndex = users.findIndex(u => u.id === req.params.id);
-    
-    if (userIndex === -1) {
-        return res.status(404).json({ error: 'User not found' });
-    }
+app.delete('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id);
+        
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
 
-    const targetUser = users[userIndex];
-    
-    if (targetUser.role === 'superadmin') {
-        return res.status(403).json({ error: 'Cannot delete super admin' });
-    }
+        if (user.role === 'superadmin') {
+            return res.status(403).json({ error: 'Cannot delete superadmin' });
+        }
 
-    if (targetUser.id === req.user.id) {
-        return res.status(403).json({ error: 'Cannot delete yourself' });
+        await User.deleteOne({ _id: req.params.id });
+        res.json({ message: 'User deleted successfully' });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to delete user' });
     }
-
-    users.splice(userIndex, 1);
-    saveUsers(users);
-    
-    res.json({ success: true });
 });
 
 // Get all transfers
-app.get('/api/admin/transfers', authenticateToken, requireAdmin, (req, res) => {
-    const transfers = [];
-    const expiryMs = systemSettings.expiryTime * 60 * 60 * 1000;
-    
-    for (const [code, info] of fileStore.entries()) {
-        transfers.push({
-            code,
-            fileCount: info.files.length,
-            totalSize: info.files.reduce((sum, f) => sum + f.size, 0),
-            downloadCount: info.downloadCount,
-            uploadedBy: info.uploadedBy || 'Anonymous',
-            uploadedAt: info.uploadedAt,
-            expiresAt: new Date(info.uploadedAt + expiryMs).toISOString()
-        });
+app.get('/api/admin/transfers', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const transfers = await Transfer.find().sort({ createdAt: -1 });
+        const transfersList = transfers.map(t => ({
+            code: t.code,
+            files: t.files,
+            totalSize: t.totalSize,
+            uploadedAt: t.createdAt,
+            expiresAt: t.expiresAt,
+            downloadCount: t.downloadCount,
+            uploaderEmail: t.uploaderEmail,
+            hasPassword: !!t.password,
+            message: t.message
+        }));
+        res.json({ transfers: transfersList });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to get transfers' });
     }
-    
-    res.json({ transfers });
 });
 
-// Delete transfer (admin)
-app.delete('/api/admin/transfers/:code', authenticateToken, requireAdmin, (req, res) => {
-    const code = req.params.code.toUpperCase();
-    const fileInfo = fileStore.get(code);
-    
-    if (!fileInfo) {
-        return res.status(404).json({ error: 'Transfer not found' });
-    }
-
-    fileInfo.files.forEach(file => {
-        if (fs.existsSync(file.path)) {
-            fs.unlinkSync(file.path);
+// Delete transfer
+app.delete('/api/admin/transfers/:code', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const transfer = await Transfer.findOne({ code: req.params.code });
+        
+        if (!transfer) {
+            return res.status(404).json({ error: 'Transfer not found' });
         }
-    });
-    
-    fileStore.delete(code);
-    res.json({ success: true });
+
+        // Delete physical files
+        for (const file of transfer.files) {
+            if (fs.existsSync(file.path)) {
+                fs.unlinkSync(file.path);
+            }
+        }
+
+        await Transfer.deleteOne({ code: req.params.code });
+        res.json({ message: 'Transfer deleted successfully' });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to delete transfer' });
+    }
 });
 
 // Update settings
-app.put('/api/admin/settings', authenticateToken, requireSuperAdmin, (req, res) => {
-    const { maxFileSize, maxFiles, expiryTime, allowAnonymous, storagePath, enableCloudStorage, cloudProvider, cloudBucket, cloudRegion } = req.body;
-    
-    if (maxFileSize) systemSettings.maxFileSize = parseInt(maxFileSize);
-    if (maxFiles) systemSettings.maxFiles = parseInt(maxFiles);
-    if (expiryTime) systemSettings.expiryTime = parseInt(expiryTime);
-    if (typeof allowAnonymous === 'boolean') systemSettings.allowAnonymous = allowAnonymous;
-    if (storagePath) {
-        systemSettings.storagePath = storagePath;
-        // Ensure the new storage directory exists
-        const fullPath = path.isAbsolute(storagePath) ? storagePath : path.join(__dirname, storagePath);
-        if (!fs.existsSync(fullPath)) {
-            fs.mkdirSync(fullPath, { recursive: true });
+app.put('/api/admin/settings', authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+        const { maxFileSize, maxFiles, expiryTime, storagePath, enableCloudStorage, cloudProvider, cloudBucket, cloudRegion } = req.body;
+        
+        let settings = await Settings.findOne({ key: 'global' });
+        if (!settings) {
+            settings = new Settings({ key: 'global' });
         }
+
+        if (maxFileSize !== undefined) settings.maxFileSize = maxFileSize;
+        if (maxFiles !== undefined) settings.maxFilesPerTransfer = maxFiles;
+        if (expiryTime !== undefined) settings.defaultExpiryHours = expiryTime;
+        if (storagePath !== undefined) settings.storagePath = storagePath;
+        if (enableCloudStorage !== undefined) settings.enableCloudStorage = enableCloudStorage;
+        if (cloudProvider !== undefined) settings.cloudProvider = cloudProvider;
+        if (cloudBucket !== undefined) settings.cloudBucket = cloudBucket;
+        if (cloudRegion !== undefined) settings.cloudRegion = cloudRegion;
+        settings.updatedAt = new Date();
+
+        await settings.save();
+        res.json({ message: 'Settings updated successfully', settings });
+    } catch (error) {
+        console.error('Settings update error:', error);
+        res.status(500).json({ error: 'Failed to update settings' });
     }
-    if (typeof enableCloudStorage === 'boolean') systemSettings.enableCloudStorage = enableCloudStorage;
-    if (cloudProvider) systemSettings.cloudProvider = cloudProvider;
-    if (cloudBucket !== undefined) systemSettings.cloudBucket = cloudBucket;
-    if (cloudRegion !== undefined) systemSettings.cloudRegion = cloudRegion;
-    
-    // Persist settings to file
-    saveSettings(systemSettings);
-    
-    // Update upload middleware
-    upload = createUploadMiddleware();
-    
-    res.json({ success: true, settings: systemSettings });
 });
 
-// Get current settings
-app.get('/api/admin/settings', authenticateToken, requireAdmin, (req, res) => {
-    res.json({ settings: systemSettings });
+// Get settings
+app.get('/api/admin/settings', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const settings = await getSettings();
+        res.json({ settings });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to get settings' });
+    }
 });
 
 // ==================== DATABASE MANAGEMENT API (SuperAdmin Only) ====================
 
-// Get all database files info
-app.get('/api/admin/database', authenticateToken, requireSuperAdmin, (req, res) => {
+// Get all database info
+app.get('/api/admin/database', authenticateToken, requireSuperAdmin, async (req, res) => {
     try {
-        const users = loadUsers();
-        const settings = loadSettings();
-        
-        // Get file stats
-        const usersFilePath = path.join(dataDir, 'users.json');
-        const settingsFilePath = path.join(dataDir, 'settings.json');
-        
-        const usersStats = fs.existsSync(usersFilePath) ? fs.statSync(usersFilePath) : null;
-        const settingsStats = fs.existsSync(settingsFilePath) ? fs.statSync(settingsFilePath) : null;
-        
+        const users = await User.find().select('-password');
+        const settings = await Settings.findOne({ key: 'global' });
+        const transfers = await Transfer.find();
+
         res.json({
             success: true,
             databases: {
                 users: {
-                    name: 'users.json',
-                    path: usersFilePath,
-                    size: usersStats ? usersStats.size : 0,
-                    modified: usersStats ? usersStats.mtime : null,
+                    name: 'users',
                     recordCount: users.length,
-                    data: users.map(u => ({ ...u, password: '[HIDDEN]' })) // Hide passwords
+                    data: users.map(u => ({ ...u.toObject(), id: u._id, password: '[HIDDEN]' }))
                 },
                 settings: {
-                    name: 'settings.json',
-                    path: settingsFilePath,
-                    size: settingsStats ? settingsStats.size : 0,
-                    modified: settingsStats ? settingsStats.mtime : null,
-                    data: settings
+                    name: 'settings',
+                    data: settings ? settings.toObject() : {}
+                },
+                transfers: {
+                    name: 'transfers',
+                    recordCount: transfers.length,
+                    data: transfers.map(t => ({
+                        ...t.toObject(),
+                        id: t.code,
+                        password: t.password ? '[PROTECTED]' : null
+                    }))
                 }
             }
         });
@@ -671,100 +660,57 @@ app.get('/api/admin/database', authenticateToken, requireSuperAdmin, (req, res) 
     }
 });
 
-// Download database file
-app.get('/api/admin/database/download/:type', authenticateToken, requireSuperAdmin, (req, res) => {
+// Download database
+app.get('/api/admin/database/download/:type', authenticateToken, requireSuperAdmin, async (req, res) => {
     try {
         const { type } = req.params;
-        let filePath, filename;
-        
+        let data;
+        let filename;
+
         if (type === 'users') {
-            filePath = path.join(dataDir, 'users.json');
+            data = await User.find().select('-password');
             filename = 'users.json';
         } else if (type === 'settings') {
-            filePath = path.join(dataDir, 'settings.json');
+            data = await Settings.findOne({ key: 'global' });
             filename = 'settings.json';
+        } else if (type === 'transfers') {
+            data = await Transfer.find();
+            filename = 'transfers.json';
         } else if (type === 'all') {
-            // Create a combined backup
-            const backup = {
+            const users = await User.find();
+            const settings = await Settings.findOne({ key: 'global' });
+            const transfers = await Transfer.find();
+            data = {
                 exportedAt: new Date().toISOString(),
-                users: loadUsers().map(u => ({ ...u, password: '[EXPORTED]' })),
-                settings: loadSettings()
+                users: users.map(u => ({ ...u.toObject(), password: '[EXPORTED]' })),
+                settings: settings ? settings.toObject() : {},
+                transfers: transfers.map(t => t.toObject())
             };
-            res.setHeader('Content-Type', 'application/json');
-            res.setHeader('Content-Disposition', `attachment; filename="backup-${Date.now()}.json"`);
-            return res.json(backup);
+            filename = `backup-${Date.now()}.json`;
         } else {
             return res.status(400).json({ error: 'Invalid database type' });
         }
-        
-        if (!fs.existsSync(filePath)) {
-            return res.status(404).json({ error: 'Database file not found' });
-        }
-        
+
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-        res.sendFile(filePath);
+        res.json(data);
     } catch (error) {
         console.error('Database download error:', error);
         res.status(500).json({ error: 'Failed to download database' });
     }
 });
 
-// Update database (settings only - users require specific endpoints)
-app.put('/api/admin/database/:type', authenticateToken, requireSuperAdmin, (req, res) => {
+// Update database
+app.put('/api/admin/database/:type', authenticateToken, requireSuperAdmin, async (req, res) => {
     try {
         const { type } = req.params;
         const { data } = req.body;
-        
-        if (!data) {
-            return res.status(400).json({ error: 'No data provided' });
-        }
-        
+
         if (type === 'settings') {
-            // Validate and save settings
-            const validKeys = ['maxFileSize', 'maxFiles', 'expiryTime', 'allowAnonymous', 'storagePath', 'enableCloudStorage', 'cloudProvider', 'cloudBucket', 'cloudRegion'];
-            const newSettings = {};
-            
-            for (const key of validKeys) {
-                if (data[key] !== undefined) {
-                    newSettings[key] = data[key];
-                }
-            }
-            
-            Object.assign(systemSettings, newSettings);
-            saveSettings(systemSettings);
-            
-            res.json({ success: true, message: 'Settings updated', settings: systemSettings });
-        } else if (type === 'users') {
-            // For users, only allow editing specific fields (not password directly)
-            if (!Array.isArray(data)) {
-                return res.status(400).json({ error: 'Users data must be an array' });
-            }
-            
-            let users = loadUsers();
-            
-            // Update existing users (don't allow adding new users or changing passwords this way)
-            for (const userData of data) {
-                const userIndex = users.findIndex(u => u.id === userData.id);
-                if (userIndex !== -1) {
-                    // Only update allowed fields
-                    if (userData.name) users[userIndex].name = userData.name;
-                    if (userData.email) users[userIndex].email = userData.email.toLowerCase();
-                    if (userData.role && ['user', 'admin', 'superadmin'].includes(userData.role)) {
-                        // Don't allow demoting the last superadmin
-                        const superadminCount = users.filter(u => u.role === 'superadmin').length;
-                        if (users[userIndex].role === 'superadmin' && userData.role !== 'superadmin' && superadminCount <= 1) {
-                            continue; // Skip this update
-                        }
-                        users[userIndex].role = userData.role;
-                    }
-                }
-            }
-            
-            saveUsers(users);
-            res.json({ success: true, message: 'Users updated', count: users.length });
+            await Settings.findOneAndUpdate({ key: 'global' }, data, { upsert: true });
+            res.json({ message: 'Settings updated successfully' });
         } else {
-            return res.status(400).json({ error: 'Invalid database type' });
+            return res.status(400).json({ error: 'Only settings can be directly edited' });
         }
     } catch (error) {
         console.error('Database update error:', error);
@@ -776,293 +722,275 @@ app.put('/api/admin/database/:type', authenticateToken, requireSuperAdmin, (req,
 app.post('/api/admin/change-password', authenticateToken, async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
-        
+
         if (!currentPassword || !newPassword) {
-            return res.status(400).json({ error: 'Current and new password required' });
+            return res.status(400).json({ error: 'Current and new password are required' });
         }
 
         if (newPassword.length < 6) {
-            return res.status(400).json({ error: 'Password must be at least 6 characters' });
+            return res.status(400).json({ error: 'New password must be at least 6 characters' });
         }
 
-        let users = loadUsers();
-        const userIndex = users.findIndex(u => u.id === req.user.id);
-        
-        if (userIndex === -1) {
+        const user = await User.findById(req.user.id);
+        if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
 
-        const user = users[userIndex];
-        
-        if (user.provider === 'google') {
-            return res.status(400).json({ error: 'Cannot change password for Google accounts' });
-        }
-
-        const validPassword = await bcrypt.compare(currentPassword, user.password);
-        if (!validPassword) {
+        const isValid = await bcrypt.compare(currentPassword, user.password);
+        if (!isValid) {
             return res.status(401).json({ error: 'Current password is incorrect' });
         }
 
-        users[userIndex].password = await bcrypt.hash(newPassword, 10);
-        saveUsers(users);
-        
-        res.json({ success: true });
+        user.password = await bcrypt.hash(newPassword, 10);
+        await user.save();
+
+        res.json({ message: 'Password changed successfully' });
     } catch (error) {
         console.error('Change password error:', error);
         res.status(500).json({ error: 'Failed to change password' });
     }
 });
 
-// ==================== FILE TRANSFER API ROUTES ====================
+// ==================== FILE TRANSFER ROUTES ====================
 
-// Upload file(s) - using dynamic middleware for current settings
+// Upload files
 app.post('/api/upload', optionalAuth, (req, res, next) => {
-    // Recreate upload middleware with current settings
-    const currentUpload = multer({
-        storage: storage,
-        limits: { fileSize: (systemSettings.maxFileSize || 2000) * 1024 * 1024 }
+    upload.array('files', 50)(req, res, async (err) => {
+        if (err) {
+            console.error('Upload error:', err);
+            if (err.code === 'LIMIT_FILE_SIZE') {
+                return res.status(400).json({ error: 'File size exceeds limit' });
+            }
+            return res.status(500).json({ error: 'Upload failed: ' + err.message });
+        }
+
+        try {
+            if (!req.files || req.files.length === 0) {
+                return res.status(400).json({ error: 'No files uploaded' });
+            }
+
+            const settings = await getSettings();
+            const code = generateTransferCode();
+            
+            // Calculate expiry
+            let expiryHours = parseInt(req.body.expiryHours) || settings.defaultExpiryHours || 24;
+            expiryHours = Math.min(expiryHours, 168); // Max 7 days
+            const expiresAt = new Date(Date.now() + expiryHours * 60 * 60 * 1000);
+
+            const uploadDir = await getUploadDir();
+            const files = req.files.map(file => ({
+                originalName: file.originalname,
+                storedName: file.filename,
+                path: path.join(uploadDir, file.filename),
+                size: file.size,
+                mimeType: file.mimetype
+            }));
+
+            const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+
+            // Handle password
+            let hashedPassword = null;
+            if (req.body.password && req.body.password.trim()) {
+                hashedPassword = await bcrypt.hash(req.body.password, 10);
+            }
+
+            // Create transfer in database
+            const transfer = await Transfer.create({
+                code,
+                files,
+                totalSize,
+                expiresAt,
+                password: hashedPassword,
+                message: req.body.message || '',
+                uploaderEmail: req.user?.email || null
+            });
+
+            console.log(`Transfer created: ${code} with ${files.length} files`);
+
+            res.json({
+                code,
+                files: files.length,
+                totalSize,
+                expiresAt: transfer.expiresAt,
+                hasPassword: !!hashedPassword
+            });
+        } catch (error) {
+            console.error('Upload processing error:', error);
+            res.status(500).json({ error: 'Failed to process upload' });
+        }
     });
-    currentUpload.array('files', systemSettings.maxFiles || 50)(req, res, next);
-}, (req, res) => {
+});
+
+// Get files info
+app.get('/api/files/:code', async (req, res) => {
     try {
-        if (!systemSettings.allowAnonymous && !req.user) {
-            return res.status(401).json({ error: 'Login required to upload files' });
+        const transfer = await Transfer.findOne({ code: req.params.code.toUpperCase() });
+
+        if (!transfer) {
+            return res.status(404).json({ error: 'Transfer not found or expired' });
         }
 
-        if (!req.files || req.files.length === 0) {
-            return res.status(400).json({ error: 'No files uploaded' });
+        if (transfer.expiresAt < new Date()) {
+            await Transfer.deleteOne({ code: transfer.code });
+            return res.status(404).json({ error: 'Transfer has expired' });
         }
 
-        const transferCode = generateTransferCode();
-        
-        // Get advanced options from request body or query params
-        const password = req.body.password || req.query.password || null;
-        const expiryHours = parseInt(req.body.expiryTime || req.query.expiryTime) || systemSettings.expiryTime;
-        const message = req.body.message || req.query.message || null;
-        const folderPaths = req.body.folderPaths ? JSON.parse(req.body.folderPaths) : null;
-        
-        const files = req.files.map((file, index) => ({
-            originalName: file.originalname,
-            filename: file.filename,
-            path: file.path,
-            size: file.size,
-            mimetype: file.mimetype,
-            folderPath: folderPaths && folderPaths[index] ? folderPaths[index] : null
-        }));
-
-        // Hash password if provided
-        const hashedPassword = password ? bcrypt.hashSync(password, 10) : null;
-
-        fileStore.set(transferCode, {
-            files: files,
-            uploadedAt: Date.now(),
-            expiresAt: Date.now() + (expiryHours * 60 * 60 * 1000),
-            downloadCount: 0,
-            uploadedBy: req.user ? req.user.email : null,
-            password: hashedPassword,
-            message: message,
-            hasPassword: !!password
-        });
-
-        console.log(`Files uploaded with code: ${transferCode}, count: ${files.length}, password protected: ${!!password}`);
-        
         res.json({
-            success: true,
-            transferCode: transferCode,
-            fileCount: files.length,
-            totalSize: files.reduce((sum, f) => sum + f.size, 0),
-            expiresIn: `${expiryHours} hour(s)`,
-            hasPassword: !!password,
-            hasMessage: !!message
+            files: transfer.files.map(f => ({
+                name: f.originalName,
+                size: f.size,
+                type: f.mimeType
+            })),
+            totalSize: transfer.totalSize,
+            uploadedAt: transfer.createdAt,
+            expiresAt: transfer.expiresAt,
+            downloadCount: transfer.downloadCount,
+            hasPassword: !!transfer.password,
+            message: transfer.message
         });
     } catch (error) {
-        console.error('Upload error:', error);
-        res.status(500).json({ error: 'Upload failed' });
+        console.error('Get files error:', error);
+        res.status(500).json({ error: 'Failed to get files' });
     }
 });
 
-// Get file info by transfer code
-app.get('/api/files/:code', (req, res) => {
-    const code = req.params.code.toUpperCase();
-    const fileInfo = fileStore.get(code);
-    
-    if (!fileInfo) {
-        return res.status(404).json({ error: 'Transfer code not found or expired' });
-    }
-    
-    // Check if transfer has expired
-    if (fileInfo.expiresAt && Date.now() > fileInfo.expiresAt) {
-        fileStore.delete(code);
-        return res.status(404).json({ error: 'Transfer has expired' });
-    }
-    
-    res.json({
-        success: true,
-        files: fileInfo.files.map(f => ({
-            name: f.originalName,
-            size: f.size,
-            type: f.mimetype,
-            folderPath: f.folderPath
-        })),
-        uploadedAt: fileInfo.uploadedAt,
-        expiresAt: fileInfo.expiresAt,
-        downloadCount: fileInfo.downloadCount,
-        hasPassword: fileInfo.hasPassword || false,
-        message: fileInfo.message
-    });
-});
+// Verify password
+app.post('/api/files/:code/verify', async (req, res) => {
+    try {
+        const transfer = await Transfer.findOne({ code: req.params.code.toUpperCase() });
 
-// Verify password for protected transfer
-app.post('/api/files/:code/verify', (req, res) => {
-    const code = req.params.code.toUpperCase();
-    const { password } = req.body;
-    const fileInfo = fileStore.get(code);
-    
-    if (!fileInfo) {
-        return res.status(404).json({ error: 'Transfer code not found or expired' });
+        if (!transfer) {
+            return res.status(404).json({ error: 'Transfer not found' });
+        }
+
+        if (!transfer.password) {
+            return res.json({ valid: true });
+        }
+
+        const { password } = req.body;
+        const isValid = await bcrypt.compare(password || '', transfer.password);
+
+        res.json({ valid: isValid });
+    } catch (error) {
+        res.status(500).json({ error: 'Verification failed' });
     }
-    
-    if (!fileInfo.password) {
-        return res.json({ success: true, verified: true });
-    }
-    
-    const isValid = bcrypt.compareSync(password || '', fileInfo.password);
-    
-    if (!isValid) {
-        return res.status(401).json({ error: 'Incorrect password' });
-    }
-    
-    res.json({ success: true, verified: true });
 });
 
 // Download single file
-app.get('/api/download/:code/:index', (req, res) => {
-    const code = req.params.code.toUpperCase();
-    const index = parseInt(req.params.index);
-    const password = req.query.password;
-    const fileInfo = fileStore.get(code);
-    
-    if (!fileInfo) {
-        return res.status(404).json({ error: 'Transfer code not found or expired' });
-    }
-    
-    // Check password if protected
-    if (fileInfo.password) {
-        if (!password || !bcrypt.compareSync(password, fileInfo.password)) {
-            return res.status(401).json({ error: 'Password required' });
+app.get('/api/download/:code/:index', async (req, res) => {
+    try {
+        const transfer = await Transfer.findOne({ code: req.params.code.toUpperCase() });
+
+        if (!transfer) {
+            return res.status(404).json({ error: 'Transfer not found' });
         }
+
+        if (transfer.expiresAt < new Date()) {
+            return res.status(404).json({ error: 'Transfer has expired' });
+        }
+
+        const index = parseInt(req.params.index);
+        if (isNaN(index) || index < 0 || index >= transfer.files.length) {
+            return res.status(400).json({ error: 'Invalid file index' });
+        }
+
+        const file = transfer.files[index];
+        if (!fs.existsSync(file.path)) {
+            return res.status(404).json({ error: 'File not found on server' });
+        }
+
+        // Increment download count
+        transfer.downloadCount += 1;
+        await transfer.save();
+
+        res.download(file.path, file.originalName);
+    } catch (error) {
+        console.error('Download error:', error);
+        res.status(500).json({ error: 'Download failed' });
     }
-    
-    if (index < 0 || index >= fileInfo.files.length) {
-        return res.status(404).json({ error: 'File not found' });
-    }
-    
-    const file = fileInfo.files[index];
-    
-    if (!fs.existsSync(file.path)) {
-        return res.status(404).json({ error: 'File no longer available' });
-    }
-    
-    fileInfo.downloadCount++;
-    console.log(`File downloaded: ${file.originalName} from transfer ${code}`);
-    
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.originalName)}"`);
-    res.setHeader('Content-Type', file.mimetype || 'application/octet-stream');
-    res.sendFile(file.path);
 });
 
-// Download all files as ZIP
-app.get('/api/download-zip/:code', (req, res) => {
-    const code = req.params.code.toUpperCase();
-    const password = req.query.password;
-    const selectedIndexes = req.query.indexes ? req.query.indexes.split(',').map(Number) : null;
-    const fileInfo = fileStore.get(code);
-    
-    if (!fileInfo) {
-        return res.status(404).json({ error: 'Transfer code not found or expired' });
-    }
-    
-    // Check password if protected
-    if (fileInfo.password) {
-        if (!password || !bcrypt.compareSync(password, fileInfo.password)) {
-            return res.status(401).json({ error: 'Password required' });
+// Download as ZIP
+app.get('/api/download-zip/:code', async (req, res) => {
+    try {
+        const transfer = await Transfer.findOne({ code: req.params.code.toUpperCase() });
+
+        if (!transfer) {
+            return res.status(404).json({ error: 'Transfer not found' });
         }
-    }
-    
-    // Determine which files to include
-    const filesToZip = selectedIndexes 
-        ? fileInfo.files.filter((_, idx) => selectedIndexes.includes(idx))
-        : fileInfo.files;
-    
-    if (filesToZip.length === 0) {
-        return res.status(404).json({ error: 'No files to download' });
-    }
-    
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="transfer-${code}.zip"`);
-    
-    const archive = archiver('zip', { zlib: { level: 9 } });
-    
-    archive.on('error', (err) => {
-        console.error('Archive error:', err);
-        res.status(500).json({ error: 'Failed to create ZIP file' });
-    });
-    
-    archive.pipe(res);
-    
-    filesToZip.forEach(file => {
-        if (fs.existsSync(file.path)) {
-            // If file has folder path, preserve folder structure
-            const archivePath = file.folderPath || file.originalName;
-            archive.file(file.path, { name: archivePath });
+
+        if (transfer.expiresAt < new Date()) {
+            return res.status(404).json({ error: 'Transfer has expired' });
         }
-    });
-    
-    archive.finalize();
-    
-    fileInfo.downloadCount++;
-    console.log(`ZIP download: ${filesToZip.length} files from transfer ${code}`);
+
+        // Increment download count
+        transfer.downloadCount += 1;
+        await transfer.save();
+
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="transfer-${transfer.code}.zip"`);
+
+        const archive = archiver('zip', { zlib: { level: 5 } });
+        archive.pipe(res);
+
+        for (const file of transfer.files) {
+            if (fs.existsSync(file.path)) {
+                archive.file(file.path, { name: file.originalName });
+            }
+        }
+
+        await archive.finalize();
+    } catch (error) {
+        console.error('ZIP download error:', error);
+        res.status(500).json({ error: 'ZIP download failed' });
+    }
 });
 
-// Delete transfer (for sender to delete after transfer)
-app.delete('/api/files/:code', (req, res) => {
-    const code = req.params.code.toUpperCase();
-    const fileInfo = fileStore.get(code);
-    
-    if (!fileInfo) {
-        return res.status(404).json({ error: 'Transfer code not found' });
-    }
-    
-    // Delete files from disk
-    fileInfo.files.forEach(file => {
-        if (fs.existsSync(file.path)) {
-            fs.unlinkSync(file.path);
+// Delete transfer (by uploader or admin)
+app.delete('/api/files/:code', async (req, res) => {
+    try {
+        const transfer = await Transfer.findOne({ code: req.params.code.toUpperCase() });
+
+        if (!transfer) {
+            return res.status(404).json({ error: 'Transfer not found' });
         }
-    });
-    
-    fileStore.delete(code);
-    console.log(`Transfer deleted: ${code}`);
-    
-    res.json({ success: true, message: 'Files deleted' });
+
+        // Delete physical files
+        for (const file of transfer.files) {
+            if (fs.existsSync(file.path)) {
+                fs.unlinkSync(file.path);
+            }
+        }
+
+        await Transfer.deleteOne({ code: transfer.code });
+        res.json({ message: 'Transfer deleted successfully' });
+    } catch (error) {
+        console.error('Delete transfer error:', error);
+        res.status(500).json({ error: 'Failed to delete transfer' });
+    }
 });
 
-// Public settings endpoint (limited info for frontend)
-app.get('/api/settings', (req, res) => {
-    res.json({
-        settings: {
-            maxFileSize: systemSettings.maxFileSize,
-            maxFiles: systemSettings.maxFiles,
-            expiryTime: systemSettings.expiryTime,
-            allowAnonymous: systemSettings.allowAnonymous
-        }
-    });
+// Get public settings
+app.get('/api/settings', async (req, res) => {
+    try {
+        const settings = await getSettings();
+        res.json({
+            maxFileSize: settings.maxFileSize || 2000,
+            maxFiles: settings.maxFilesPerTransfer || 50,
+            expiryTime: settings.defaultExpiryHours || 24
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to get settings' });
+    }
 });
 
 // Health check
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
+    const transferCount = dbConnected ? await Transfer.countDocuments() : 0;
     res.json({ 
         status: 'ok', 
-        activeTransfers: fileStore.size
+        database: dbConnected ? 'connected' : 'disconnected',
+        activeTransfers: transferCount
     });
 });
 
@@ -1078,12 +1006,22 @@ app.get('*', (req, res) => {
 
 // Start server
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Open http://localhost:${PORT} in your browser`);
-    console.log('');
-    console.log('=== Super Admin Credentials ===');
-    console.log('Email: admin@filetransfer.com');
-    console.log('Password: admin123');
-    console.log('===============================');
+
+// Connect to database then start server
+connectDB().then(() => {
+    server.listen(PORT, '0.0.0.0', () => {
+        console.log(`\n🚀 Server running on port ${PORT}`);
+        console.log(`   Open http://localhost:${PORT} in your browser`);
+        console.log('');
+        console.log('=== Super Admin Credentials ===');
+        console.log('Email: admin@filetransfer.com');
+        console.log('Password: admin123');
+        console.log('===============================');
+        console.log('');
+        if (!dbConnected) {
+            console.log('⚠️  WARNING: Database not connected!');
+            console.log('   Set MONGODB_URI environment variable to connect to MongoDB Atlas');
+            console.log('');
+        }
+    });
 });

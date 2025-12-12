@@ -234,6 +234,9 @@
                         <button id="downloadSettingsBtn" class="btn btn-secondary">
                             <span>⚙️</span> Download Settings
                         </button>
+                        <button id="downloadTransfersBtn" class="btn btn-secondary">
+                            <span>📁</span> Download Transfers
+                        </button>
                         <button id="downloadAllBtn" class="btn btn-primary">
                             <span>📦</span> Download Full Backup
                         </button>
@@ -247,6 +250,7 @@
                     <div class="database-tabs">
                         <button class="db-tab-btn active" data-db="users">Users (<span id="userCount">0</span>)</button>
                         <button class="db-tab-btn" data-db="settings">Settings</button>
+                        <button class="db-tab-btn" data-db="transfers">Transfers (<span id="transfersCount">0</span>)</button>
                     </div>
                     
                     <div class="database-info">
@@ -262,6 +266,11 @@
                         <div id="dbSettingsView" class="db-view">
                             <div class="json-editor-wrapper">
                                 <textarea id="settingsJsonEditor" class="json-editor" readonly></textarea>
+                            </div>
+                        </div>
+                        <div id="dbTransfersView" class="db-view">
+                            <div class="json-editor-wrapper">
+                                <textarea id="transfersJsonEditor" class="json-editor" readonly></textarea>
                             </div>
                         </div>
                     </div>

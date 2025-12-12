@@ -446,28 +446,34 @@ async function loadDatabase() {
 function renderDatabaseView() {
     if (!databaseData || !databaseData.databases) return;
     
-    const { users, settings } = databaseData.databases;
+    const { users, settings, transfers } = databaseData.databases;
     
     // Update counts
     document.getElementById('userCount').textContent = users.recordCount || 0;
+    document.getElementById('transfersCount').textContent = transfers?.recordCount || 0;
     
     // Update file info
     const dbFileInfo = document.getElementById('dbFileInfo');
     if (dbFileInfo) {
         const usersSize = formatSize(users.size || 0);
         const settingsSize = formatSize(settings.size || 0);
-        dbFileInfo.textContent = `Users: ${usersSize} | Settings: ${settingsSize} | Last modified: ${formatDate(users.modified)}`;
+        const transfersSize = formatSize(transfers?.size || 0);
+        dbFileInfo.textContent = `Users: ${usersSize} | Settings: ${settingsSize} | Transfers: ${transfersSize} | Last modified: ${formatDate(users.modified)}`;
     }
     
     // Render JSON in viewers
     const usersEditor = document.getElementById('usersJsonEditor');
     const settingsEditor = document.getElementById('settingsJsonEditor');
+    const transfersEditor = document.getElementById('transfersJsonEditor');
     
     if (usersEditor) {
         usersEditor.value = JSON.stringify(users.data, null, 2);
     }
     if (settingsEditor) {
         settingsEditor.value = JSON.stringify(settings.data, null, 2);
+    }
+    if (transfersEditor && transfers) {
+        transfersEditor.value = JSON.stringify(transfers.data, null, 2);
     }
 }
 
@@ -490,6 +496,10 @@ document.getElementById('downloadUsersBtn')?.addEventListener('click', () => {
 
 document.getElementById('downloadSettingsBtn')?.addEventListener('click', () => {
     downloadDatabase('settings');
+});
+
+document.getElementById('downloadTransfersBtn')?.addEventListener('click', () => {
+    downloadDatabase('transfers');
 });
 
 document.getElementById('downloadAllBtn')?.addEventListener('click', () => {
