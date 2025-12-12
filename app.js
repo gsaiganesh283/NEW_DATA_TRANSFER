@@ -8,14 +8,44 @@ const socket = io({
     transports: ['websocket', 'polling']
 });
 
-// WebRTC configuration with STUN and TURN servers for cross-region connectivity
+// WebRTC configuration with global STUN and TURN servers
 const rtcConfig = {
     iceServers: [
-        // Google STUN servers
+        // Global STUN servers
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
-        // Open TURN servers for relay when direct connection fails
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
+        
+        // Metered TURN servers - Global (free tier)
+        {
+            urls: 'turn:a.relay.metered.ca:80',
+            username: 'e8dd65f92ae8d16fcfdb802c',
+            credential: 'uWdWNmkhvyqTmFzS'
+        },
+        {
+            urls: 'turn:a.relay.metered.ca:80?transport=tcp',
+            username: 'e8dd65f92ae8d16fcfdb802c',
+            credential: 'uWdWNmkhvyqTmFzS'
+        },
+        {
+            urls: 'turn:a.relay.metered.ca:443',
+            username: 'e8dd65f92ae8d16fcfdb802c',
+            credential: 'uWdWNmkhvyqTmFzS'
+        },
+        {
+            urls: 'turn:a.relay.metered.ca:443?transport=tcp',
+            username: 'e8dd65f92ae8d16fcfdb802c',
+            credential: 'uWdWNmkhvyqTmFzS'
+        },
+        {
+            urls: 'turns:a.relay.metered.ca:443',
+            username: 'e8dd65f92ae8d16fcfdb802c',
+            credential: 'uWdWNmkhvyqTmFzS'
+        },
+        
+        // OpenRelay Global TURN
         {
             urls: 'turn:openrelay.metered.ca:80',
             username: 'openrelayproject',
@@ -31,20 +61,14 @@ const rtcConfig = {
             username: 'openrelayproject',
             credential: 'openrelayproject'
         },
-        // Backup TURN servers
-        {
-            urls: 'turn:relay.metered.ca:80',
-            username: 'e8dd65f92ae8d16fcfdb802c',
-            credential: 'uWdWNmkhvyqTmFzS'
-        },
-        {
-            urls: 'turn:relay.metered.ca:443',
-            username: 'e8dd65f92ae8d16fcfdb802c',
-            credential: 'uWdWNmkhvyqTmFzS'
-        }
+        
+        // Twilio Global STUN (free)
+        { urls: 'stun:global.stun.twilio.com:3478' }
     ],
     iceCandidatePoolSize: 10,
-    iceTransportPolicy: 'all'  // Use 'relay' to force TURN if needed
+    iceTransportPolicy: 'all',
+    bundlePolicy: 'max-bundle',
+    rtcpMuxPolicy: 'require'
 };
 
 // ICE candidate queue for handling candidates before remote description is set
@@ -223,9 +247,13 @@ function setupSocketListeners() {
     // Handle reconnection request from guest (host only)
     socket.on('reconnect-request', (data) => {
         if (isHost) {
-            console.log('Received reconnect request, creating new offer...');
+            console.log('Received reconnect request, forceRelay:', data.forceRelay);
             pendingIceCandidates = [];
-            createPeerConnection();
+            if (data.forceRelay) {
+                createPeerConnectionWithConfig(getRelayOnlyConfig());
+            } else {
+                createPeerConnection();
+            }
             createOffer();
         }
     });
@@ -338,14 +366,134 @@ function createPeerConnection() {
     }
 }
 
+// Get relay-only config for fallback
+function getRelayOnlyConfig() {
+    return {
+        ...rtcConfig,
+        iceTransportPolicy: 'relay'  // Force TURN relay only
+    };
+}
+
 function retryConnection() {
+    // On second retry, force TURN relay
+    const useRelayOnly = connectionRetries >= 2;
+    
     if (isHost) {
         pendingIceCandidates = [];
-        createPeerConnection();
+        if (useRelayOnly) {
+            console.log('Forcing TURN relay for connection...');
+            createPeerConnectionWithConfig(getRelayOnlyConfig());
+        } else {
+            createPeerConnection();
+        }
         createOffer();
     } else {
         // Guest needs to wait for new offer from host
-        socket.emit('request-reconnect', { roomCode });
+        socket.emit('request-reconnect', { roomCode, forceRelay: useRelayOnly });
+    }
+}
+
+function createPeerConnectionWithConfig(config) {
+    // Clean up existing connection
+    if (peerConnection) {
+        peerConnection.close();
+    }
+    
+    // Clear any existing timeout
+    if (connectionTimeout) {
+        clearTimeout(connectionTimeout);
+    }
+    
+    peerConnection = new RTCPeerConnection(config);
+    
+    // Set connection timeout (30 seconds)
+    connectionTimeout = setTimeout(() => {
+        if (peerConnection && peerConnection.connectionState !== 'connected') {
+            console.log('Connection timeout, retrying...');
+            if (connectionRetries < MAX_RETRIES) {
+                connectionRetries++;
+                showError(`Connection timeout. Retrying (${connectionRetries}/${MAX_RETRIES})...`);
+                retryConnection();
+            } else {
+                showError('Connection failed after multiple attempts. Please try again.');
+                disconnect();
+            }
+        }
+    }, 30000);
+
+    // ICE gathering state
+    peerConnection.onicegatheringstatechange = () => {
+        console.log('ICE gathering state:', peerConnection.iceGatheringState);
+    };
+
+    // ICE candidate handling
+    peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+            console.log('ICE candidate type:', event.candidate.type || 'end');
+            socket.emit('ice-candidate', {
+                candidate: event.candidate,
+                roomCode
+            });
+        }
+    };
+
+    peerConnection.onicecandidateerror = (event) => {
+        console.error('ICE candidate error:', event.errorCode, event.errorText);
+    };
+
+    peerConnection.oniceconnectionstatechange = () => {
+        console.log('ICE connection state:', peerConnection.iceConnectionState);
+        
+        if (peerConnection.iceConnectionState === 'failed') {
+            console.log('ICE connection failed, attempting restart...');
+            peerConnection.restartIce();
+        } else if (peerConnection.iceConnectionState === 'connected') {
+            if (connectionTimeout) {
+                clearTimeout(connectionTimeout);
+                connectionTimeout = null;
+            }
+            connectionRetries = 0;
+        }
+    };
+
+    peerConnection.onconnectionstatechange = () => {
+        console.log('Connection state:', peerConnection.connectionState);
+        
+        if (peerConnection.connectionState === 'connected') {
+            if (connectionTimeout) {
+                clearTimeout(connectionTimeout);
+                connectionTimeout = null;
+            }
+            connectionRetries = 0;
+            updateStatus('connected', 'Peer connected');
+            showSection('transferSection');
+            showSuccess('Connected! You can now transfer files.');
+        } else if (peerConnection.connectionState === 'disconnected') {
+            updateStatus('connecting', 'Reconnecting...');
+            showError('Connection interrupted. Attempting to reconnect...');
+        } else if (peerConnection.connectionState === 'failed') {
+            if (connectionRetries < MAX_RETRIES) {
+                connectionRetries++;
+                showError(`Connection failed. Retrying (${connectionRetries}/${MAX_RETRIES})...`);
+                retryConnection();
+            } else {
+                showError('Connection failed. Please try again.');
+                disconnect();
+            }
+        }
+    };
+
+    // Data channel for file transfer
+    if (isHost) {
+        dataChannel = peerConnection.createDataChannel('fileTransfer', {
+            ordered: true
+        });
+        setupDataChannel();
+    } else {
+        peerConnection.ondatachannel = (event) => {
+            dataChannel = event.channel;
+            setupDataChannel();
+        };
     }
 }
 

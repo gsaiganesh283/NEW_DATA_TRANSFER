@@ -104,11 +104,11 @@ io.on('connection', (socket) => {
   });
 
   // Handle reconnection request from guest
-  socket.on('request-reconnect', ({ roomCode }) => {
+  socket.on('request-reconnect', ({ roomCode, forceRelay }) => {
     const room = rooms.get(roomCode);
     if (room && room.host) {
-      console.log(`Reconnect requested for room: ${roomCode}`);
-      io.to(room.host).emit('reconnect-request', { peerId: socket.id });
+      console.log(`Reconnect requested for room: ${roomCode}, forceRelay: ${forceRelay}`);
+      io.to(room.host).emit('reconnect-request', { peerId: socket.id, forceRelay });
     }
   });
 
