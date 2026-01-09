@@ -1,0 +1,11 @@
+[
+    {
+        "id": "4c82ef04-bfd4-44af-8897-739a22d8d618",
+        "name": "Super Admin",
+        "email": "admin@filetransfer.com",
+        "password": "$2y$10$Gf4zOTpFwm442cf0BUN3gO\/AELR8X2hqtQkk7L2VrAtsKhO51KhVO",
+        "role": "superadmin",
+        "provider": "local",
+        "createdAt": "2026-01-09T12:12:27+00:00"
+    }
+]

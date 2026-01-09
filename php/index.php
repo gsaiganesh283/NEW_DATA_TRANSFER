@@ -1,6 +1,19 @@
 <?php
 // Main router for the application
 
+// Set error handler
+error_reporting(E_ALL);
+set_error_handler(function($errno, $errstr, $errfile, $errline) {
+    if (!(error_reporting() & $errno)) {
+        return false;
+    }
+    error_log("PHP Error: $errstr in $errfile:$errline");
+    http_response_code(500);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'Server error']);
+    exit;
+});
+
 require_once __DIR__ . '/config.php';
 
 // Set headers
@@ -52,7 +65,22 @@ else {
     }
     elseif (file_exists($filePath) && is_file($filePath)) {
         // Serve the file
-        $mimeType = mime_content_type($filePath);
+        $ext = pathinfo($filePath, PATHINFO_EXTENSION);
+        $mimeTypes = [
+            'html' => 'text/html',
+            'js' => 'application/javascript',
+            'css' => 'text/css',
+            'json' => 'application/json',
+            'png' => 'image/png',
+            'jpg' => 'image/jpeg',
+            'jpeg' => 'image/jpeg',
+            'gif' => 'image/gif',
+            'svg' => 'image/svg+xml',
+            'woff' => 'font/woff',
+            'woff2' => 'font/woff2',
+            'ttf' => 'font/ttf'
+        ];
+        $mimeType = $mimeTypes[$ext] ?? 'application/octet-stream';
         header('Content-Type: ' . $mimeType);
         readfile($filePath);
     }

@@ -1,6 +1,18 @@
 <?php
 // File Transfer API endpoints
 
+// Set error handler to catch all errors
+error_reporting(E_ALL);
+set_error_handler(function($errno, $errstr, $errfile, $errline) {
+    if (!(error_reporting() & $errno)) {
+        return false;
+    }
+    http_response_code(500);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'Server error: ' . $errstr . ' in ' . $errfile . ':' . $errline]);
+    exit;
+});
+
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../jwt.php';
 
@@ -15,6 +27,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 $method = $_SERVER['REQUEST_METHOD'];
 $path = trim($_SERVER['PATH_INFO'] ?? '', '/');
+
+// Fallback: if PATH_INFO is empty, try to extract from REQUEST_URI
+if (empty($path) && isset($_SERVER['REQUEST_URI'])) {
+    $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+    $basePaths = ['/php/api/', '/api/'];
+    foreach ($basePaths as $basePath) {
+        if (strpos($uri, $basePath) === 0) {
+            $path = substr($uri, strlen($basePath));
+            break;
+        }
+    }
+}
+
 $pathParts = explode('/', $path);
 
 // Route: POST /upload
