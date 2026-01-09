@@ -37,6 +37,16 @@ if (strpos($path, $basePath) === 0) {
     $path = substr($path, strlen($basePath));
 }
 
+// Handle requests that were rewritten from root .htaccess
+// These might come in as /api/..., /auth/..., /admin/... pointing to php/index.php
+// We need to check if the path starts with these
+if (strpos($path, '/api/') === 0 || strpos($path, '/auth/') === 0 || strpos($path, '/admin/') === 0) {
+    // Path already starts with /api, /auth, or /admin - use as is
+} else if (strpos($path, 'api/') === 0 || strpos($path, 'auth/') === 0 || strpos($path, 'admin/') === 0) {
+    // Path starts with api/, auth/, or admin/ - add leading slash
+    $path = '/' . $path;
+}
+
 // Remove leading and trailing slashes
 $path = trim($path, '/');
 

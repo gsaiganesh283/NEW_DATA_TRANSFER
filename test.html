@@ -94,11 +94,49 @@
     
     <div class="test-container">
         <div class="test-section">
-            <button onclick="runAllTests()">▶ Run All Tests</button>
-            <button onclick="testDOM()">Test DOM Elements</button>
-            <button onclick="testEventListeners()">Test Event Listeners</button>
-            <button onclick="testAPIEndpoints()">Test API Endpoints</button>
-            <button onclick="testButtonFunctionality()">Test Button Functionality</button>
+            <h2>⚠️ INSTRUCTIONS</h2>
+            <p><strong>This test suite tests the actual application (index.html), not this test page.</strong></p>
+            <ol>
+                <li>Open your actual application: <code>http://localhost:YOUR_PORT/index.html</code></li>
+                <li>Open DevTools (F12) and go to Console tab</li>
+                <li>Copy and paste this code into the console:</li>
+            </ol>
+            <pre style="background: #f4f4f4; padding: 10px; border-radius: 4px; overflow-x: auto;">
+// Test API Endpoints
+const API_BASE = '/php';
+async function testAPIs() {
+    const endpoints = [
+        '/api/settings',
+        '/api/health',
+        '/auth/verify'
+    ];
+    for (const ep of endpoints) {
+        try {
+            const res = await fetch(API_BASE + ep);
+            console.log(`${ep}: ${res.status} ${res.ok ? '✅' : '❌'}`);
+        } catch(e) {
+            console.log(`${ep}: ERROR - ${e.message} ❌`);
+        }
+    }
+}
+testAPIs();
+
+// Test DOM Elements
+console.log('=== DOM ELEMENTS ===');
+console.log('uploadZone:', !!document.getElementById('uploadZone') ? '✅' : '❌');
+console.log('uploadBtn:', !!document.getElementById('uploadBtn') ? '✅' : '❌');
+console.log('toggleAdvancedBtn:', !!document.getElementById('toggleAdvancedBtn') ? '✅' : '❌');
+console.log('copyCodeBtn:', !!document.getElementById('copyCodeBtn') ? '✅' : '❌');
+console.log('fetchFilesBtn:', !!document.getElementById('fetchFilesBtn') ? '✅' : '❌');
+            </pre>
+        </div>
+
+        <hr style="margin: 20px 0;">
+
+        <div class="test-section">
+            <h2>Or Use These Buttons</h2>
+            <button onclick="testAPIEndpoints()">🧪 Test API Endpoints</button>
+            <button onclick="showDOMElements()">📋 Show Available DOM Elements</button>
         </div>
 
         <div id="results"></div>
@@ -119,31 +157,16 @@
             document.getElementById('results').innerHTML = '';
         }
 
-        // Test 1: DOM Elements
+        // Test 1: DOM Elements (shows on current page)
         function testDOM() {
             clearResults();
-            addResult('Test', 'Starting DOM Element Tests...', 'warning');
+            addResult('Test', 'Starting DOM Element Tests on this page...', 'warning');
 
             const elements = {
                 'uploadZone': '#uploadZone',
-                'fileInput': '#fileInput',
-                'folderInput': '#folderInput',
                 'uploadBtn': '#uploadBtn',
                 'toggleAdvancedBtn': '#toggleAdvancedBtn',
-                'passwordProtect': '#passwordProtect',
-                'transferPassword': '#transferPassword',
-                'copyCodeBtn': '#copyCodeBtn',
-                'deleteTransferBtn': '#deleteTransferBtn',
-                'newTransferBtn': '#newTransferBtn',
-                'codeInput': '#codeInput',
-                'fetchFilesBtn': '#fetchFilesBtn',
-                'selectDestinationBtn': '#selectDestinationBtn',
-                'downloadSelectedBtn': '#downloadSelectedBtn',
-                'downloadAsZipBtn': '#downloadAsZipBtn',
-                'unlockBtn': '#unlockBtn',
-                'previewPanel': '#previewPanel',
-                'advancedOptions': '#advancedOptions',
-                'availableFiles': '#availableFiles'
+                'copyCodeBtn': '#copyCodeBtn'
             };
 
             Object.entries(elements).forEach(([name, selector]) => {
@@ -151,145 +174,62 @@
                 if (element) {
                     addResult(`Element: ${name}`, `✓ Found (${selector})`, 'pass');
                 } else {
-                    addResult(`Element: ${name}`, `✗ NOT FOUND (${selector})`, 'fail');
+                    addResult(`Element: ${name}`, `✗ NOT FOUND - Expected on index.html (${selector})`, 'fail');
                 }
             });
         }
 
-        // Test 2: Event Listeners
-        function testEventListeners() {
-            clearResults();
-            addResult('Test', 'Starting Event Listener Tests...', 'warning');
-
-            const listeners = {
-                'uploadZone (click)': () => document.getElementById('uploadZone')?.onclick,
-                'fileInput (change)': () => document.getElementById('fileInput')?.onchange,
-                'uploadBtn (click)': () => document.getElementById('uploadBtn')?.onclick,
-                'toggleAdvancedBtn (click)': () => document.getElementById('toggleAdvancedBtn')?.onclick,
-                'passwordProtect (change)': () => document.getElementById('passwordProtect')?.onchange,
-                'copyCodeBtn (click)': () => document.getElementById('copyCodeBtn')?.onclick,
-                'deleteTransferBtn (click)': () => document.getElementById('deleteTransferBtn')?.onclick,
-                'newTransferBtn (click)': () => document.getElementById('newTransferBtn')?.onclick,
-                'fetchFilesBtn (click)': () => document.getElementById('fetchFilesBtn')?.onclick,
-                'codeInput (keypress)': () => document.getElementById('codeInput')?.onkeypress,
-                'selectDestinationBtn (click)': () => document.getElementById('selectDestinationBtn')?.onclick,
-                'downloadSelectedBtn (click)': () => document.getElementById('downloadSelectedBtn')?.onclick,
-                'downloadAsZipBtn (click)': () => document.getElementById('downloadAsZipBtn')?.onclick,
-                'unlockBtn (click)': () => document.getElementById('unlockBtn')?.onclick
-            };
-
-            Object.entries(listeners).forEach(([name, fn]) => {
-                try {
-                    const listener = fn();
-                    if (listener && typeof listener === 'function') {
-                        addResult(`Listener: ${name}`, `✓ Attached`, 'pass');
-                    } else if (!fn()) {
-                        addResult(`Listener: ${name}`, `⚠ Element or listener not found`, 'warning');
-                    } else {
-                        addResult(`Listener: ${name}`, `✗ NO HANDLER`, 'fail');
-                    }
-                } catch (e) {
-                    addResult(`Listener: ${name}`, `✗ Error: ${e.message}`, 'fail');
-                }
-            });
-        }
-
-        // Test 3: API Endpoints
+        // Test API Endpoints
         async function testAPIEndpoints() {
             clearResults();
-            addResult('Test', 'Testing API Endpoints...', 'warning');
+            addResult('API Test', '🧪 Testing API Endpoints...', 'warning');
 
             const endpoints = [
-                { url: `${API_BASE}/api/settings`, method: 'GET', name: 'GET /api/settings' },
-                { url: `${API_BASE}/api/health`, method: 'GET', name: 'GET /api/health' }
+                { url: `${API_BASE}/api/settings`, method: 'GET', name: 'GET /php/api/settings' },
+                { url: `${API_BASE}/api/health`, method: 'GET', name: 'GET /php/api/health' },
+                { url: `/api/settings`, method: 'GET', name: 'GET /api/settings (wrong path)' },
+                { url: `/api/health`, method: 'GET', name: 'GET /api/health (wrong path)' }
             ];
 
             for (const endpoint of endpoints) {
                 try {
                     const response = await fetch(endpoint.url, { method: endpoint.method });
-                    if (response.ok) {
-                        const data = await response.json();
-                        addResult(`API: ${endpoint.name}`, `✓ Status ${response.status}`, 'pass');
-                    } else {
-                        addResult(`API: ${endpoint.name}`, `✗ Status ${response.status}`, 'fail');
-                    }
+                    const status = response.status;
+                    const statusText = response.ok ? `✓ ${status} OK` : `✗ ${status} ${response.statusText}`;
+                    const resultClass = response.ok ? 'pass' : 'fail';
+                    addResult(`API: ${endpoint.name}`, statusText, resultClass);
                 } catch (error) {
                     addResult(`API: ${endpoint.name}`, `✗ Error: ${error.message}`, 'fail');
                 }
             }
         }
 
-        // Test 4: Button Functionality
-        function testButtonFunctionality() {
+        // Show available DOM elements (for reference on index.html)
+        function showDOMElements() {
             clearResults();
-            addResult('Test', 'Testing Button Functionality...', 'warning');
-
-            const buttons = [
-                { id: 'uploadBtn', expected: 'click', action: () => { 
-                    const btn = document.getElementById('uploadBtn');
-                    return btn && btn.style.display !== 'none';
-                }},
-                { id: 'toggleAdvancedBtn', expected: 'visible', action: () => {
-                    const btn = document.getElementById('toggleAdvancedBtn');
-                    return btn && btn.style.display !== 'none';
-                }},
-                { id: 'copyCodeBtn', expected: 'functional', action: () => {
-                    const btn = document.getElementById('copyCodeBtn');
-                    return btn && typeof btn.onclick === 'function';
-                }},
-                { id: 'deleteTransferBtn', expected: 'functional', action: () => {
-                    const btn = document.getElementById('deleteTransferBtn');
-                    return btn && typeof btn.onclick === 'function';
-                }},
-                { id: 'fetchFilesBtn', expected: 'functional', action: () => {
-                    const btn = document.getElementById('fetchFilesBtn');
-                    return btn && typeof btn.onclick === 'function';
-                }},
-                { id: 'selectDestinationBtn', expected: 'available', action: () => {
-                    const btn = document.getElementById('selectDestinationBtn');
-                    return btn !== null;
-                }},
-                { id: 'downloadSelectedBtn', expected: 'available', action: () => {
-                    const btn = document.getElementById('downloadSelectedBtn');
-                    return btn !== null;
-                }},
-                { id: 'unlockBtn', expected: 'available', action: () => {
-                    const btn = document.getElementById('unlockBtn');
-                    return btn !== null;
-                }}
+            addResult('Info', '📋 Expected DOM Elements on index.html:', 'warning');
+            
+            const expectedElements = [
+                'uploadZone', 'fileInput', 'folderInput', 'uploadBtn',
+                'toggleAdvancedBtn', 'passwordProtect', 'transferPassword',
+                'copyCodeBtn', 'deleteTransferBtn', 'newTransferBtn',
+                'codeInput', 'fetchFilesBtn', 'selectDestinationBtn',
+                'downloadSelectedBtn', 'downloadAsZipBtn', 'unlockBtn',
+                'previewPanel', 'advancedOptions', 'availableFiles'
             ];
 
-            buttons.forEach(btn => {
-                try {
-                    const result = btn.action();
-                    if (result) {
-                        addResult(`Button: ${btn.id}`, `✓ ${btn.expected}`, 'pass');
-                    } else {
-                        addResult(`Button: ${btn.id}`, `✗ NOT ${btn.expected}`, 'fail');
-                    }
-                } catch (e) {
-                    addResult(`Button: ${btn.id}`, `✗ Error: ${e.message}`, 'fail');
-                }
+            expectedElements.forEach(id => {
+                const exists = document.getElementById(id);
+                const status = exists ? '✅ Found' : '❌ Not found';
+                const resultClass = exists ? 'pass' : 'fail';
+                addResult(`Element: ${id}`, status, resultClass);
             });
-        }
-
-        // Run all tests
-        async function runAllTests() {
-            clearResults();
-            addResult('Test Suite', 'Running all tests...', 'warning');
-            testDOM();
-            addResult('', '---', 'warning');
-            testEventListeners();
-            addResult('', '---', 'warning');
-            await testAPIEndpoints();
-            addResult('', '---', 'warning');
-            testButtonFunctionality();
-        }
-
         // Auto-run on page load
         window.addEventListener('load', () => {
-            addResult('Initialization', '✓ Test page loaded. Click a test button above or press "Run All Tests"', 'pass');
+            addResult('Ready', '✅ Test suite loaded. Use buttons above to test.', 'pass');
+            addResult('Info', '⚠️ This page tests the API and shows expected elements. To test the actual UI, go to index.html', 'warning');
         });
     </script>
 </body>
 </html>
+

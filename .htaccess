@@ -1,15 +1,30 @@
 <IfModule mod_rewrite.c>
     RewriteEngine On
+    RewriteBase /
     
     # Prevent direct access to php folder files
     RewriteRule ^php/data/ - [F]
     
-    # Redirect to php folder if needed
+    # Redirect /api/* to /php/index.php
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteCond %{REQUEST_FILENAME} !-d
-    RewriteRule ^api/ php/index.php [QSA,L]
-    RewriteRule ^auth/ php/index.php [QSA,L]
-    RewriteRule ^admin/ php/index.php [QSA,L]
+    RewriteRule ^api/(.*)$ php/index.php [QSA,L]
+    
+    # Redirect /auth/* to /php/index.php
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^auth/(.*)$ php/index.php [QSA,L]
+    
+    # Redirect /admin/* to /php/index.php
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^admin/(.*)$ php/index.php [QSA,L]
+    
+    # Redirect /php/* requests directly to php/index.php
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_URI} ^/php/
+    RewriteRule ^php/(.*)$ php/index.php [QSA,L]
 </IfModule>
 
 # Set appropriate headers
