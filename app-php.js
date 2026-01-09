@@ -437,12 +437,21 @@ async function uploadFiles() {
                     showToast('Files uploaded successfully!', 'success');
                 } catch (parseError) {
                     console.error('JSON parse error:', parseError);
-                    showToast('Upload error: Invalid response', 'error');
+                    console.error('Response text:', xhr.responseText);
+                    showToast('Upload error: Invalid response from server', 'error');
                     resetUploadUI();
                 }
             } else {
-                const error = JSON.parse(xhr.responseText);
-                throw new Error(error.error || 'Upload failed');
+                try {
+                    const error = JSON.parse(xhr.responseText);
+                    console.error('Server error:', error);
+                    showToast('Upload failed: ' + (error.error || 'Unknown error'), 'error');
+                } catch (e) {
+                    console.error('Upload failed with status:', xhr.status);
+                    console.error('Response:', xhr.responseText);
+                    showToast('Upload failed: Server returned ' + xhr.status, 'error');
+                }
+                resetUploadUI();
             }
         };
 
@@ -451,7 +460,7 @@ async function uploadFiles() {
             resetUploadUI();
         };
 
-        xhr.open('POST', '/api/upload');
+        xhr.open('POST', API_BASE + '/api/upload');
         xhr.send(formData);
     } catch (error) {
         showToast(error.message || 'Upload failed. Please try again.', 'error');
@@ -476,7 +485,7 @@ deleteTransferBtn.addEventListener('click', async () => {
     if (!currentTransferCode) return;
     
     try {
-        const response = await fetch(`/api/files/${currentTransferCode}`, {
+        const response = await fetch(`${API_BASE}/api/files/${currentTransferCode}`, {
             method: 'DELETE'
         });
         
@@ -541,7 +550,7 @@ async function fetchFiles() {
     
     try {
         console.log('Fetching files for code:', code);
-        const response = await fetch(`/api/files/${code}`);
+        const response = await fetch(`${API_BASE}/api/files/${code}`);
         const data = await response.json();
         console.log('Response:', data);
 
@@ -588,7 +597,7 @@ function showPasswordPrompt(code, data) {
         const password = accessPassword.value;
         
         try {
-            const response = await fetch(`/api/files/${code}/verify`, {
+            const response = await fetch(`${API_BASE}/api/files/${code}/verify`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ password })
@@ -756,7 +765,7 @@ function getSelectedIndexes() {
 }
 
 function downloadFile(code, index, filename) {
-    let url = `/api/download/${code}/${index}`;
+    let url = `${API_BASE}/api/download/${code}/${index}`;
     if (currentTransferPassword) {
         url += `?password=${encodeURIComponent(currentTransferPassword)}`;
     }
@@ -769,7 +778,7 @@ function downloadFile(code, index, filename) {
 }
 
 function downloadAsZip(code, indexes) {
-    let url = `/api/download-zip/${code}?indexes=${indexes.join(',')}`;
+    let url = `${API_BASE}/api/download-zip/${code}?indexes=${indexes.join(',')}`;
     if (currentTransferPassword) {
         url += `&password=${encodeURIComponent(currentTransferPassword)}`;
     }
@@ -879,7 +888,7 @@ async function downloadToSelectedFolder(code, files, selectedIndexes) {
     
     for (const idx of selectedIndexes) {
         const file = files[idx];
-        let url = `/api/download/${code}/${idx}`;
+        let url = `${API_BASE}/api/download/${code}/${idx}`;
         if (currentTransferPassword) {
             url += `?password=${encodeURIComponent(currentTransferPassword)}`;
         }
@@ -976,7 +985,7 @@ async function downloadZipToFolder(code, indexes) {
         return;
     }
     
-    let url = `/api/download-zip/${code}?indexes=${indexes.join(',')}`;
+    let url = `${API_BASE}/api/download-zip/${code}?indexes=${indexes.join(',')}`;
     if (currentTransferPassword) {
         url += `&password=${encodeURIComponent(currentTransferPassword)}`;
     }
@@ -1018,7 +1027,7 @@ function previewFile(code, index, filename, type) {
     
     if (!previewPanel || !previewContent) return;
     
-    let url = `/api/download/${code}/${index}`;
+    let url = `${API_BASE}/api/download/${code}/${index}`;
     if (currentTransferPassword) {
         url += `?password=${encodeURIComponent(currentTransferPassword)}`;
     }
