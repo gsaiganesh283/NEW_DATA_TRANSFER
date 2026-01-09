@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Application Test Suite</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #007bff;
+            margin-top: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f9f9f9;
+            border-left: 4px solid #007bff;
+        }
+        .test-result {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .test-result.pass {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .test-result.fail {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .test-result.warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background: #007bff;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 Application Test Suite</h1>
+    
+    <div class="test-container">
+        <div class="test-section">
+            <button onclick="runAllTests()">▶ Run All Tests</button>
+            <button onclick="testDOM()">Test DOM Elements</button>
+            <button onclick="testEventListeners()">Test Event Listeners</button>
+            <button onclick="testAPIEndpoints()">Test API Endpoints</button>
+            <button onclick="testButtonFunctionality()">Test Button Functionality</button>
+        </div>
+
+        <div id="results"></div>
+    </div>
+
+    <script>
+        const API_BASE = '/php';
+
+        function addResult(title, message, status = 'pass') {
+            const resultsDiv = document.getElementById('results');
+            const resultDiv = document.createElement('div');
+            resultDiv.className = `test-result ${status}`;
+            resultDiv.innerHTML = `<strong>${title}:</strong> ${message}`;
+            resultsDiv.appendChild(resultDiv);
+        }
+
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+
+        // Test 1: DOM Elements
+        function testDOM() {
+            clearResults();
+            addResult('Test', 'Starting DOM Element Tests...', 'warning');
+
+            const elements = {
+                'uploadZone': '#uploadZone',
+                'fileInput': '#fileInput',
+                'folderInput': '#folderInput',
+                'uploadBtn': '#uploadBtn',
+                'toggleAdvancedBtn': '#toggleAdvancedBtn',
+                'passwordProtect': '#passwordProtect',
+                'transferPassword': '#transferPassword',
+                'copyCodeBtn': '#copyCodeBtn',
+                'deleteTransferBtn': '#deleteTransferBtn',
+                'newTransferBtn': '#newTransferBtn',
+                'codeInput': '#codeInput',
+                'fetchFilesBtn': '#fetchFilesBtn',
+                'selectDestinationBtn': '#selectDestinationBtn',
+                'downloadSelectedBtn': '#downloadSelectedBtn',
+                'downloadAsZipBtn': '#downloadAsZipBtn',
+                'unlockBtn': '#unlockBtn',
+                'previewPanel': '#previewPanel',
+                'advancedOptions': '#advancedOptions',
+                'availableFiles': '#availableFiles'
+            };
+
+            Object.entries(elements).forEach(([name, selector]) => {
+                const element = document.querySelector(selector);
+                if (element) {
+                    addResult(`Element: ${name}`, `✓ Found (${selector})`, 'pass');
+                } else {
+                    addResult(`Element: ${name}`, `✗ NOT FOUND (${selector})`, 'fail');
+                }
+            });
+        }
+
+        // Test 2: Event Listeners
+        function testEventListeners() {
+            clearResults();
+            addResult('Test', 'Starting Event Listener Tests...', 'warning');
+
+            const listeners = {
+                'uploadZone (click)': () => document.getElementById('uploadZone')?.onclick,
+                'fileInput (change)': () => document.getElementById('fileInput')?.onchange,
+                'uploadBtn (click)': () => document.getElementById('uploadBtn')?.onclick,
+                'toggleAdvancedBtn (click)': () => document.getElementById('toggleAdvancedBtn')?.onclick,
+                'passwordProtect (change)': () => document.getElementById('passwordProtect')?.onchange,
+                'copyCodeBtn (click)': () => document.getElementById('copyCodeBtn')?.onclick,
+                'deleteTransferBtn (click)': () => document.getElementById('deleteTransferBtn')?.onclick,
+                'newTransferBtn (click)': () => document.getElementById('newTransferBtn')?.onclick,
+                'fetchFilesBtn (click)': () => document.getElementById('fetchFilesBtn')?.onclick,
+                'codeInput (keypress)': () => document.getElementById('codeInput')?.onkeypress,
+                'selectDestinationBtn (click)': () => document.getElementById('selectDestinationBtn')?.onclick,
+                'downloadSelectedBtn (click)': () => document.getElementById('downloadSelectedBtn')?.onclick,
+                'downloadAsZipBtn (click)': () => document.getElementById('downloadAsZipBtn')?.onclick,
+                'unlockBtn (click)': () => document.getElementById('unlockBtn')?.onclick
+            };
+
+            Object.entries(listeners).forEach(([name, fn]) => {
+                try {
+                    const listener = fn();
+                    if (listener && typeof listener === 'function') {
+                        addResult(`Listener: ${name}`, `✓ Attached`, 'pass');
+                    } else if (!fn()) {
+                        addResult(`Listener: ${name}`, `⚠ Element or listener not found`, 'warning');
+                    } else {
+                        addResult(`Listener: ${name}`, `✗ NO HANDLER`, 'fail');
+                    }
+                } catch (e) {
+                    addResult(`Listener: ${name}`, `✗ Error: ${e.message}`, 'fail');
+                }
+            });
+        }
+
+        // Test 3: API Endpoints
+        async function testAPIEndpoints() {
+            clearResults();
+            addResult('Test', 'Testing API Endpoints...', 'warning');
+
+            const endpoints = [
+                { url: `${API_BASE}/api/settings`, method: 'GET', name: 'GET /api/settings' },
+                { url: `${API_BASE}/api/health`, method: 'GET', name: 'GET /api/health' }
+            ];
+
+            for (const endpoint of endpoints) {
+                try {
+                    const response = await fetch(endpoint.url, { method: endpoint.method });
+                    if (response.ok) {
+                        const data = await response.json();
+                        addResult(`API: ${endpoint.name}`, `✓ Status ${response.status}`, 'pass');
+                    } else {
+                        addResult(`API: ${endpoint.name}`, `✗ Status ${response.status}`, 'fail');
+                    }
+                } catch (error) {
+                    addResult(`API: ${endpoint.name}`, `✗ Error: ${error.message}`, 'fail');
+                }
+            }
+        }
+
+        // Test 4: Button Functionality
+        function testButtonFunctionality() {
+            clearResults();
+            addResult('Test', 'Testing Button Functionality...', 'warning');
+
+            const buttons = [
+                { id: 'uploadBtn', expected: 'click', action: () => { 
+                    const btn = document.getElementById('uploadBtn');
+                    return btn && btn.style.display !== 'none';
+                }},
+                { id: 'toggleAdvancedBtn', expected: 'visible', action: () => {
+                    const btn = document.getElementById('toggleAdvancedBtn');
+                    return btn && btn.style.display !== 'none';
+                }},
+                { id: 'copyCodeBtn', expected: 'functional', action: () => {
+                    const btn = document.getElementById('copyCodeBtn');
+                    return btn && typeof btn.onclick === 'function';
+                }},
+                { id: 'deleteTransferBtn', expected: 'functional', action: () => {
+                    const btn = document.getElementById('deleteTransferBtn');
+                    return btn && typeof btn.onclick === 'function';
+                }},
+                { id: 'fetchFilesBtn', expected: 'functional', action: () => {
+                    const btn = document.getElementById('fetchFilesBtn');
+                    return btn && typeof btn.onclick === 'function';
+                }},
+                { id: 'selectDestinationBtn', expected: 'available', action: () => {
+                    const btn = document.getElementById('selectDestinationBtn');
+                    return btn !== null;
+                }},
+                { id: 'downloadSelectedBtn', expected: 'available', action: () => {
+                    const btn = document.getElementById('downloadSelectedBtn');
+                    return btn !== null;
+                }},
+                { id: 'unlockBtn', expected: 'available', action: () => {
+                    const btn = document.getElementById('unlockBtn');
+                    return btn !== null;
+                }}
+            ];
+
+            buttons.forEach(btn => {
+                try {
+                    const result = btn.action();
+                    if (result) {
+                        addResult(`Button: ${btn.id}`, `✓ ${btn.expected}`, 'pass');
+                    } else {
+                        addResult(`Button: ${btn.id}`, `✗ NOT ${btn.expected}`, 'fail');
+                    }
+                } catch (e) {
+                    addResult(`Button: ${btn.id}`, `✗ Error: ${e.message}`, 'fail');
+                }
+            });
+        }
+
+        // Run all tests
+        async function runAllTests() {
+            clearResults();
+            addResult('Test Suite', 'Running all tests...', 'warning');
+            testDOM();
+            addResult('', '---', 'warning');
+            testEventListeners();
+            addResult('', '---', 'warning');
+            await testAPIEndpoints();
+            addResult('', '---', 'warning');
+            testButtonFunctionality();
+        }
+
+        // Auto-run on page load
+        window.addEventListener('load', () => {
+            addResult('Initialization', '✓ Test page loaded. Click a test button above or press "Run All Tests"', 'pass');
+        });
+    </script>
+</body>
+</html>
